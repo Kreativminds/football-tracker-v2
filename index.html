@@ -643,7 +643,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
   APP_VERSION: '1.1.0',
-  SCHEMA_VERSION: 2,
+  SCHEMA_VERSION: 3,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
   FULL_GAME_MINS: 80,
@@ -831,6 +831,10 @@ const DB = (() => {
           pgs.createIndex('gameId', 'gameId', { unique: false });
           pgs.createIndex('seasonId', 'seasonId', { unique: false });
         }
+        if (!db.objectStoreNames.contains('events')) {
+          const ev = db.createObjectStore('events', { keyPath: 'eventId', autoIncrement: true });
+          ev.createIndex('playerId', 'playerId', { unique: false });
+        }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
       req.onerror = e => reject(e.target.error);
@@ -888,14 +892,14 @@ const DB = (() => {
   }
 
   async function getAllFromAllStores() {
-    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats'];
+    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats','events'];
     const result = {};
     for (const s of stores) { result[s] = await getAll(s); }
     return result;
   }
 
   async function restoreAllStores(data) {
-    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats'];
+    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats','events'];
     for (const s of stores) {
       await clear(s);
       if (data[s]) {
@@ -1554,12 +1558,14 @@ async function buildTrackedNav() {
         <button class="import-tab" id="tab-log-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'log')">Match Log</button>
         <button class="import-tab" id="tab-clubs-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'clubs')">Club History</button>
         <button class="import-tab" id="tab-ach-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'ach')">Achievements</button>
+        <button class="import-tab" id="tab-events-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'events')">Events</button>
       </div>
       <div id="tracked-content-${p.playerId}"></div>
       <div id="tracked-stats-${p.playerId}" style="display:none"></div>
       <div id="tracked-log-${p.playerId}" style="display:none"></div>
       <div id="tracked-clubs-${p.playerId}" style="display:none"></div>
       <div id="tracked-ach-${p.playerId}" style="display:none"></div>
+      <div id="tracked-events-${p.playerId}" style="display:none"></div>
     </div>`).join('');
 }
 
@@ -1573,6 +1579,7 @@ function switchTrackedTab(playerId, tab) {
     log:      `tracked-log-${playerId}`,
     clubs:    `tracked-clubs-${playerId}`,
     ach:      `tracked-ach-${playerId}`,
+    events:   `tracked-events-${playerId}`,
   };
   const btnMap = {
     overview: `tab-overview-${playerId}`,
@@ -1580,6 +1587,7 @@ function switchTrackedTab(playerId, tab) {
     log:      `tab-log-${playerId}`,
     clubs:    `tab-clubs-${playerId}`,
     ach:      `tab-ach-${playerId}`,
+    events:   `tab-events-${playerId}`,
   };
   Object.keys(tabMap).forEach(t => {
     const el  = document.getElementById(tabMap[t]);
@@ -1587,10 +1595,11 @@ function switchTrackedTab(playerId, tab) {
     if (el)  el.style.display  = t === tab ? '' : 'none';
     if (btn) btn.classList.toggle('active-tab', t === tab);
   });
-  if (tab === 'stats') renderExtendedStats(playerId);
-  if (tab === 'log')   renderMatchLog(playerId);
-  if (tab === 'clubs') renderPlayerClubHistory(playerId);
-  if (tab === 'ach')   renderPlayerAchievements(playerId);
+  if (tab === 'stats')  renderExtendedStats(playerId);
+  if (tab === 'log')    renderMatchLog(playerId);
+  if (tab === 'clubs')  renderPlayerClubHistory(playerId);
+  if (tab === 'ach')    renderPlayerAchievements(playerId);
+  if (tab === 'events') renderPlayerEvents(playerId);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2096,6 +2105,133 @@ async function deleteAchievementEntry(playerId, id) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// EVENTS — off-season / non-competitive events per tracked player
+// ══════════════════════════════════════════════════════════════════════════════
+const EVENT_TYPE_ICONS = {
+  'Tournament': '&#127942;',
+  'Trial':      '&#128269;',
+  'Camp':       '&#9971;',
+  'Medical':    '&#127973;',
+  'Award':      '&#127941;',
+  'Trip':       '&#9992;',
+  'Other':      '&#128197;',
+};
+
+async function renderPlayerEvents(playerId) {
+  const el = document.getElementById(`tracked-events-${playerId}`);
+  if (!el) return;
+  const players = await DB.getAll('players','seasonId',State.currentSeasonId);
+  const player = players.find(p => p.playerId === playerId);
+  if (!player) return;
+
+  const all = (await DB.getAll('events','playerId',playerId)) || [];
+  all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="font-size:14px;font-weight:700">Events — ${esc(player.fullName)}</h3>
+      <button class="btn btn-primary btn-sm" onclick="openEventForm(${playerId})">+ Add Event</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:14px">Track camps, trials, tournaments, medical checks, and other activity outside the regular season.</p>
+    <div id="eventForm-${playerId}" class="form-panel panel-hidden" style="margin-bottom:16px">
+      <h3>Add Event</h3>
+      <div class="form-grid">
+        <div class="form-group full"><label>Title *</label><input id="ev-title-${playerId}" type="text" placeholder="e.g. Summer Training Camp — Sporting CP Academy"></div>
+        <div class="form-group"><label>Event Type</label>
+          <select id="ev-type-${playerId}">
+            <option>Tournament</option><option>Trial</option><option>Camp</option>
+            <option>Medical</option><option>Award</option><option>Trip</option><option>Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Start Date *</label><input id="ev-start-${playerId}" type="date"></div>
+        <div class="form-group"><label>End Date</label><input id="ev-end-${playerId}" type="date"></div>
+        <div class="form-group"><label>Location</label><input id="ev-location-${playerId}" type="text" placeholder="e.g. Lisbon"></div>
+        <div class="form-group"><label>Outcome</label><input id="ev-outcome-${playerId}" type="text" placeholder="e.g. Selected for next phase"></div>
+        <div class="form-group full"><label>Description</label><textarea id="ev-desc-${playerId}" placeholder="Notes about this event..."></textarea></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="saveEventEntry(${playerId})">Save</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('eventForm-${playerId}').classList.add('panel-hidden')">Cancel</button>
+      </div>
+      <input type="hidden" id="ev-id-${playerId}">
+    </div>
+    ${!all.length ? '<div class="empty"><strong>No events yet</strong><p>Add camps, trials, tournaments, or other off-season activity.</p></div>' :
+    `<div class="timeline-list">
+      ${all.map(e=>`
+        <div class="timeline-item">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div class="ti-title">${EVENT_TYPE_ICONS[e.eventType]||'&#128197;'} ${esc(e.title)}</div>
+              <div class="ti-meta">${e.eventType||''} ${e.startDate?'· '+fmtDate(e.startDate):''}${e.endDate?' → '+fmtDate(e.endDate):''}${e.location?' · '+esc(e.location):''}</div>
+              ${e.outcome?`<div class="ti-meta" style="font-weight:700;color:var(--dark)">Outcome: ${esc(e.outcome)}</div>`:''}
+              ${e.description?`<div class="ti-desc">${esc(e.description)}</div>`:''}
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="btn btn-secondary btn-sm" onclick="editEventEntry(${playerId},${e.eventId})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteEventEntry(${playerId},${e.eventId})">Del</button>
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`}`;
+}
+
+function openEventForm(playerId, entry) {
+  const form = document.getElementById(`eventForm-${playerId}`);
+  if (!form) return;
+  form.classList.remove('panel-hidden');
+  if (!entry) {
+    [`ev-title-${playerId}`,`ev-location-${playerId}`,`ev-outcome-${playerId}`,`ev-desc-${playerId}`].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+    const t=document.getElementById(`ev-type-${playerId}`);if(t)t.value='Tournament';
+    const s=document.getElementById(`ev-start-${playerId}`);if(s)s.value='';
+    const en=document.getElementById(`ev-end-${playerId}`);if(en)en.value='';
+    const h=document.getElementById(`ev-id-${playerId}`);if(h)h.value='';
+  }
+  form.scrollIntoView({behavior:'smooth'});
+}
+
+async function editEventEntry(playerId, id) {
+  const e = await DB.get('events', id);
+  if (!e) return;
+  openEventForm(playerId, e);
+  const s = (fid, val) => { const el=document.getElementById(`${fid}-${playerId}`); if(el) el.value=val||''; };
+  s('ev-title',e.title); s('ev-type',e.eventType); s('ev-start',e.startDate); s('ev-end',e.endDate);
+  s('ev-location',e.location); s('ev-outcome',e.outcome); s('ev-desc',e.description);
+  const h=document.getElementById(`ev-id-${playerId}`);if(h)h.value=id;
+}
+
+async function saveEventEntry(playerId) {
+  const g = id => document.getElementById(`${id}-${playerId}`)?.value||'';
+  const title = g('ev-title').trim();
+  const startDate = g('ev-start');
+  if (!title) { Toast.error('Title is required.'); return; }
+  if (!startDate) { Toast.error('Start date is required.'); return; }
+  const existingId = g('ev-id');
+  const data = {
+    playerId,
+    title,
+    eventType: g('ev-type')||'Other',
+    startDate,
+    endDate: g('ev-end')||null,
+    location: g('ev-location').trim()||null,
+    outcome: g('ev-outcome').trim()||null,
+    description: g('ev-desc').trim()||null,
+  };
+  if (existingId) data.eventId = parseInt(existingId);
+  await DB.put('events', data);
+  Toast.show('Event saved.');
+  document.getElementById(`eventForm-${playerId}`)?.classList.add('panel-hidden');
+  await renderPlayerEvents(playerId);
+}
+
+async function deleteEventEntry(playerId, id) {
+  Confirm.show('Delete Event', 'Delete this event?', async () => {
+    await DB.del('events', id);
+    Toast.show('Deleted.');
+    await renderPlayerEvents(playerId);
+  });
+}
+
 function gamesSort(key) {
   const el = document.getElementById('gamesContent');
   if (!el) return;
@@ -2205,7 +2341,7 @@ async function handleSyncDownload() {
 // DB PUT WRAPPER — marks records as modified for sync
 // ══════════════════════════════════════════════════════════════════════════════
 const _origPut = DB.put.bind(DB);
-const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats']);
+const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats','events']);
 
 DB.put = async function(store, obj) {
   if (SYNC_STORES_SET.has(store) && obj) {
