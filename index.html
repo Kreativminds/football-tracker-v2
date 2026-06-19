@@ -999,6 +999,16 @@ const Calc = (() => {
     return o > t ? 'W' : o < t ? 'L' : 'D';
   }
 
+  // Returns the score in correct football convention: Home — Away.
+  // 'our'/'their' are always from the tracked team's perspective; this
+  // flips them into home/away order based on game.homeAway so an Away
+  // game like Sporting vs SLO displays as Sporting 1 — SLO 0, not 0-1.
+  function homeAwayScore(homeAway, ourGoals, theirGoals) {
+    const o = parseInt(ourGoals)||0, t = parseInt(theirGoals)||0;
+    if (homeAway === 'Away') return { home: t, away: o };
+    return { home: o, away: t }; // Home or Neutral: we're treated as home side for display
+  }
+
   function goalContributions(goals, assists) {
     return (parseInt(goals)||0) + (parseInt(assists)||0);
   }
@@ -1083,8 +1093,10 @@ const Calc = (() => {
       if (their===0) s.cleanSheets++;
       if (our===0) s.failedToScore++;
 
-      if (res==='W' && (!s.biggestWin || gd > s.biggestWin.gd)) s.biggestWin = { score:`${our}-${their}`, opp:g.opponent, gd };
-      if (res==='L' && (!s.biggestLoss || gd < s.biggestLoss.gd)) s.biggestLoss = { score:`${our}-${their}`, opp:g.opponent, gd };
+      const haScore = homeAwayScore(g.homeAway, our, their);
+      const haScoreStr = `${haScore.home}-${haScore.away}`;
+      if (res==='W' && (!s.biggestWin || gd > s.biggestWin.gd)) s.biggestWin = { score:haScoreStr, opp:g.opponent, gd };
+      if (res==='L' && (!s.biggestLoss || gd < s.biggestLoss.gd)) s.biggestLoss = { score:haScoreStr, opp:g.opponent, gd };
     });
 
     s.goalDiff = s.goalsFor - s.goalsAgainst;
@@ -1111,7 +1123,7 @@ const Calc = (() => {
     return {calledUp,started,subbed,goals,assists,yellow,red,mom,fullGames,partial,minutes:estimatedMins(fullGames,partial)};
   }
 
-  return { teamGoals, result, goalContributions, lorenzoStats, teamSeasonStats, playerSeasonStats, estimatedMins };
+  return { teamGoals, result, homeAwayScore, goalContributions, lorenzoStats, teamSeasonStats, playerSeasonStats, estimatedMins };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1840,7 +1852,7 @@ async function renderMatchLog(playerId) {
             return `<tr>
               <td class="col-sticky-num" style="min-width:60px">${g.date?fmtDate(g.date):'—'}</td>
               <td class="col-sticky-name">${esc(g.opponent)}</td>
-              <td><span class="badge badge-${res}">${res}</span> <small class="td-muted">${our}-${their}</small></td>
+              <td><span class="badge badge-${res}">${res}</span> <small class="td-muted">${(()=>{const s=Calc.homeAwayScore(g.homeAway,our,their);return s.home+'-'+s.away;})()}</small></td>
               <td><span class="badge ${gp.role==='Starter'?'badge-starter':'badge-sub'}">${gp.role||'—'}</span></td>
               <td><span class="pos-pill">${gp.positionPlayed||'—'}</span></td>
               <td class="td-center td-bold">${gp.goals||0}</td>
@@ -2463,7 +2475,7 @@ const Render = (() => {
             </div>
             <div style="text-align:right;flex-shrink:0">
               <span class="badge badge-${gRes}">${gRes}</span>
-              <span style="font-size:15px;font-weight:700;margin-left:6px">${gOurs}–${gTheirs}</span>
+              <span style="font-size:15px;font-weight:700;margin-left:6px">${(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})()}</span>
             </div>
           </div>`;
         }).join('')}
@@ -2720,7 +2732,7 @@ const Render = (() => {
         <td class="col-sticky-name">${esc(g.opponent)}</td>
         <td>${g.homeAway||'—'}</td>
         <td><span style="font-size:11px;color:var(--muted)">${g.competitionType||'—'}</span></td>
-        <td class="td-bold">${g._our} — ${g._their}</td>
+        <td class="td-bold">${(()=>{const s=Calc.homeAwayScore(g.homeAway,g._our,g._their);return s.home+' — '+s.away;})()}</td>
         <td><span class="badge badge-${g._res}">${g._res}</span></td>
         <td onclick="event.stopPropagation()">
           <button class="btn btn-secondary btn-sm" onclick="editGame(${g.gameId})">Edit</button>
@@ -2762,6 +2774,7 @@ const Render = (() => {
     const ourScore = Calc.teamGoals(existingGP);
     const theirScore = parseInt(game.opponentScore)||0;
     const res = Calc.result(ourScore, theirScore);
+    const displayScore = Calc.homeAwayScore(game.homeAway, ourScore, theirScore);
 
     el.innerHTML = `
       <div class="game-header">
@@ -2771,7 +2784,7 @@ const Render = (() => {
             <div class="game-meta">${game.date?fmtDate(game.date):'—'} · ${game.homeAway||''} · ${game.competitionType||''} ${game.competitionName?'· '+esc(game.competitionName):''} ${game.venue?'· '+esc(game.venue):''}</div>
           </div>
           <div>
-            <div class="game-score" id="liveScore">${ourScore} — ${theirScore}</div>
+            <div class="game-score" id="liveScore">${displayScore.home} — ${displayScore.away}</div>
             <div class="game-score-sub"><span class="badge badge-${res}" id="liveResult">${res}</span></div>
           </div>
         </div>
@@ -2967,7 +2980,8 @@ const Render = (() => {
             const their = parseInt(g.opponentScore)||0;
             const res = Calc.result(our,their);
             if (!gp||!gp.calledUp) return `<div class="form-badge"><div class="fb-result badge badge-${res}">${res}</div><div class="fb-stat">${esc(g.opponent.substring(0,8))}</div><div class="fb-stat">DNP</div></div>`;
-            return `<div class="form-badge"><div class="fb-result badge badge-${res}">${res}</div><div class="fb-stat">${our}-${their}</div><div class="fb-stat">G:${gp.goals||0} A:${gp.assists||0}</div></div>`;
+            const fbs = Calc.homeAwayScore(g.homeAway, our, their);
+            return `<div class="form-badge"><div class="fb-result badge badge-${res}">${res}</div><div class="fb-stat">${fbs.home}-${fbs.away}</div><div class="fb-stat">G:${gp.goals||0} A:${gp.assists||0}</div></div>`;
           }).join('')}
         </div>
       </div>` : ''}
@@ -2994,7 +3008,7 @@ const Render = (() => {
               return `<tr>
                 <td class="col-sticky-num" style="min-width:60px">${g.date?fmtDate(g.date):'—'}</td>
                 <td class="col-sticky-name">${esc(g.opponent)}</td>
-                <td><span class="badge badge-${res}">${res}</span> <small class="td-muted">${our}-${their}</small></td>
+                <td><span class="badge badge-${res}">${res}</span> <small class="td-muted">${(()=>{const s=Calc.homeAwayScore(g.homeAway,our,their);return s.home+'-'+s.away;})()}</small></td>
                 <td><span class="badge ${gp.role==='Starter'?'badge-starter':'badge-sub'}">${gp.role||'—'}</span></td>
                 <td><span class="pos-pill">${gp.positionPlayed||'—'}</span></td>
                 <td class="td-center td-bold">${gp.goals||0}</td>
@@ -4590,7 +4604,8 @@ function updateLiveScore(gameId) {
     if(!g) return;
     const their = parseInt(g.opponentScore)||0;
     const res = Calc.result(total, their);
-    scoreEl.textContent = `${total} — ${their}`;
+    const s = Calc.homeAwayScore(g.homeAway, total, their);
+    scoreEl.textContent = `${s.home} — ${s.away}`;
     resultEl.textContent = res;
     resultEl.className = `badge badge-${res}`;
   });
