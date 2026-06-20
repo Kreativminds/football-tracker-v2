@@ -263,6 +263,21 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 .rm-form-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-start;justify-content:center;z-index:300;overflow-y:auto;padding:20px}
 .rm-form-overlay.open{display:flex}
 .rm-form{background:#fff;border-radius:4px;width:680px;max-width:95vw;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.2)}
+
+/* ── PLAYER CARD POPUP ── */
+.pc-header{background:#a23b3b;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:14px}
+.pc-photo{width:56px;height:56px;border-radius:6px;object-fit:cover;background:#fff;flex-shrink:0;border:2px solid rgba(255,255,255,.4)}
+.pc-photo-fallback{width:56px;height:56px;border-radius:6px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;flex-shrink:0;border:2px solid rgba(255,255,255,.4)}
+.pc-name{font-size:17px;font-weight:700;line-height:1.2}
+.pc-shirt{font-size:11px;opacity:.85;margin-top:2px}
+.pc-close{margin-left:auto;background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;opacity:.8}
+.pc-body{padding:18px 20px}
+.pc-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#a23b3b;border-bottom:2px solid #a23b3b;padding-bottom:6px;margin-bottom:12px;display:inline-block}
+.pc-row{padding:8px 0;border-bottom:1px solid #eee}
+.pc-row:last-child{border-bottom:none}
+.pc-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#999;margin-bottom:2px}
+.pc-value{font-size:14px;color:#222;display:flex;align-items:center;gap:6px}
+.pc-footer{padding:14px 20px;border-top:1px solid #eee;display:flex;justify-content:flex-end}
 .rm-form h2{font-size:16px;font-weight:700;margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid #ddd}
 /* ── PRINT ────────────────────────────────────────────────────────────────── */
 @media print{
@@ -650,6 +665,14 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <input type="hidden" id="rm-id">
   </div>
 </div>
+
+<!-- PLAYER CARD POPUP — tracked players only -->
+<div class="rm-form-overlay" id="playerCardOverlay" onclick="if(event.target===this) closePlayerCardPopup()">
+  <div class="rm-form" id="playerCardContent" style="max-width:380px;padding:0;overflow:hidden">
+    <!-- content injected by openPlayerCardPopup -->
+  </div>
+</div>
+
 <!-- STATIC file inputs — in DOM at page load, wired in attachEvents() -->
 <!-- Using visibility:hidden + absolute positioning — NOT display:none (blocked by Chrome Android) -->
 <div style="position:fixed;top:0;left:0;width:0;height:0;overflow:hidden;visibility:hidden">
@@ -667,7 +690,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
   APP_VERSION: '1.1.0',
-  SCHEMA_VERSION: 4,
+  SCHEMA_VERSION: 5,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
   FULL_GAME_MINS: 80,
@@ -875,12 +898,25 @@ const DB = (() => {
   }
 
   function getAll(store, indexName, key) {
-    return new Promise((resolve, reject) => {
-      const t = tx(store);
-      const s = t.objectStore(store);
-      const req = indexName ? s.index(indexName).getAll(key) : s.getAll();
-      req.onsuccess = e => resolve(e.target.result);
-      req.onerror = e => reject(e.target.error);
+    return new Promise((resolve) => {
+      // Defensive: if the store doesn't exist yet (schema upgrade pending/failed
+      // on this device), return an empty array instead of throwing synchronously
+      // and silently killing the calling async function.
+      if (!_db.objectStoreNames.contains(store)) {
+        console.warn('[DB.getAll] store does not exist yet:', store);
+        resolve([]);
+        return;
+      }
+      try {
+        const t = tx(store);
+        const s = t.objectStore(store);
+        const req = indexName ? s.index(indexName).getAll(key) : s.getAll();
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => { console.error('[DB.getAll] error', store, e.target.error); resolve([]); };
+      } catch(err) {
+        console.error('[DB.getAll] threw synchronously for store', store, err);
+        resolve([]);
+      }
     });
   }
 
@@ -895,19 +931,33 @@ const DB = (() => {
 
   function put(store, obj) {
     return new Promise((resolve, reject) => {
-      const t = tx(store, 'readwrite');
-      const req = t.objectStore(store).put(obj);
-      req.onsuccess = e => resolve(e.target.result);
-      req.onerror = e => reject(e.target.error);
+      if (!_db.objectStoreNames.contains(store)) {
+        console.error('[DB.put] store does not exist:', store, '— reload the app to apply a pending database upgrade.');
+        reject(new Error(`Store "${store}" does not exist. Please reload the app.`));
+        return;
+      }
+      try {
+        const t = tx(store, 'readwrite');
+        const req = t.objectStore(store).put(obj);
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror = e => reject(e.target.error);
+      } catch(err) { reject(err); }
     });
   }
 
   function del(store, key) {
     return new Promise((resolve, reject) => {
-      const t = tx(store, 'readwrite');
-      const req = t.objectStore(store).delete(key);
-      req.onsuccess = () => resolve();
-      req.onerror = e => reject(e.target.error);
+      if (!_db.objectStoreNames.contains(store)) {
+        console.warn('[DB.del] store does not exist:', store);
+        resolve();
+        return;
+      }
+      try {
+        const t = tx(store, 'readwrite');
+        const req = t.objectStore(store).delete(key);
+        req.onsuccess = () => resolve();
+        req.onerror = e => reject(e.target.error);
+      } catch(err) { reject(err); }
     });
   }
 
@@ -937,7 +987,11 @@ const DB = (() => {
     }
   }
 
-  return { open, get, getAll, put, del, clear, getAllFromAllStores, restoreAllStores };
+  function hasStore(store) {
+    return _db && _db.objectStoreNames.contains(store);
+  }
+
+  return { open, get, getAll, put, del, clear, getAllFromAllStores, restoreAllStores, hasStore };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2681,7 +2735,7 @@ const Render = (() => {
     const rows = players.map(p => `
       <tr>
         <td class="col-sticky-num">${p.shirtNumber||'—'}</td>
-        <td class="col-sticky-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor" title="${esc(p.trackingLabel||'Tracked')}">${esc(p.trackingLabel||'★')}</span>`:''} ${!p.isActive?'<span class="badge-nc badge" style="font-size:9px">Archived</span>':''}</td>
+        <td class="col-sticky-name" title="${esc(p.fullName)}" ${p.trackingStatus==='tracked'?`style="cursor:pointer;text-decoration:underline;text-decoration-color:#ccc" onclick="openPlayerCardPopup(${p.playerId})"`:''}>${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor" title="${esc(p.trackingLabel||'Tracked')}">${esc(p.trackingLabel||'★')}</span>`:''} ${!p.isActive?'<span class="badge-nc badge" style="font-size:9px">Archived</span>':''}</td>
         <td><span class="pos-pill">${p.primaryPosition||'—'}</span></td>
         <td>${p.secondaryPosition||'—'}</td>
         <td>${p.dominantFoot||'—'}</td>
@@ -2788,30 +2842,24 @@ const Render = (() => {
   }
 
   // ── GAME DETAIL ────────────────────────────────────────────────────────────
-  async function gameDetail(gameId, tab) {
+  async function gameDetail(gameId) {
     const el = document.getElementById('gameDetailContent');
-    const [game, players, existingGP, goalEvents] = await Promise.all([
+    const [game, players, existingGP] = await Promise.all([
       DB.get('games', gameId),
       DB.getAll('players','seasonId', State.currentSeasonId),
-      DB.getAll('gamePlayers','gameId', gameId),
-      DB.getAll('goalEvents','gameId', gameId)
+      DB.getAll('gamePlayers','gameId', gameId)
     ]);
 
     if (!game) { el.innerHTML = '<p>Game not found.</p>'; return; }
 
     const activePlayers = players.filter(p=>p.isActive).sort((a,b)=>(a.shirtNumber||99)-(b.shirtNumber||99));
-
-    // store for handlers
     window._gdPlayers = activePlayers;
     window._gdGameId = gameId;
-    window._gdGame = game;
 
     const ourScore = Calc.teamGoals(existingGP);
     const theirScore = parseInt(game.opponentScore)||0;
     const res = Calc.result(ourScore, theirScore);
     const displayScore = Calc.homeAwayScore(game.homeAway, ourScore, theirScore);
-    const currentTab = tab || State.gameDetailTab || 'played';
-    State.gameDetailTab = currentTab;
 
     el.innerHTML = `
       <div class="game-header">
@@ -2828,172 +2876,77 @@ const Render = (() => {
         ${game.teamNotes?`<div style="margin-top:10px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:10px">${esc(game.teamNotes)}</div>`:''}
       </div>
 
-      <!-- TABS -->
-      <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:16px;overflow-x:auto">
-        <button class="import-tab ${currentTab==='played'?'active-tab':''}" id="gdtab-played" onclick="switchGameDetailTab(${gameId},'played')">Who Played</button>
-        <button class="import-tab ${currentTab==='goals'?'active-tab':''}" id="gdtab-goals" onclick="switchGameDetailTab(${gameId},'goals')">Goals</button>
-        <button class="import-tab ${currentTab==='details'?'active-tab':''}" id="gdtab-details" onclick="switchGameDetailTab(${gameId},'details')">Details</button>
-      </div>
       <div style="font-size:11px;color:#2a7a3b;margin-bottom:14px">&#10003; Changes save automatically — no Save button needed.</div>
 
-      <div id="gdPanel-played" style="${currentTab==='played'?'':'display:none'}"></div>
-      <div id="gdPanel-goals" style="${currentTab==='goals'?'':'display:none'}"></div>
-      <div id="gdPanel-details" style="${currentTab==='details'?'':'display:none'}"></div>
+      <div id="gdSimpleTable"></div>
 
       <div style="margin-top:10px">
         <button class="btn btn-secondary" onclick="closeGameDetail()">&#8592; Back to Games</button>
       </div>
     `;
 
-    if (currentTab === 'played')  await renderWhoPlayedTab(gameId);
-    if (currentTab === 'goals')   await renderGoalsTab(gameId);
-    if (currentTab === 'details') await renderGameDetailsTab(gameId);
+    await renderSimpleGameTable(gameId);
   }
 
-  // ── TAB 1 — WHO PLAYED ───────────────────────────────────────────────────────
-  async function renderWhoPlayedTab(gameId) {
-    const el = document.getElementById('gdPanel-played');
+  // ── SIMPLE SINGLE-TABLE GAME ENTRY ──────────────────────────────────────────
+  // One table. Re-renders fully after every change. No tabs, no separate
+  // event log — goals/assists are plain numbers on the player's gamePlayers
+  // record, same as the very first working version of this app.
+  async function renderSimpleGameTable(gameId) {
+    const el = document.getElementById('gdSimpleTable');
     if (!el) return;
+
     if (!window._gdPlayers || !window._gdPlayers.length) {
       window._gdPlayers = (await DB.getAll('players','seasonId', State.currentSeasonId)).filter(p=>p.isActive).sort((a,b)=>(a.shirtNumber||99)-(b.shirtNumber||99));
-      window._gdGameId = gameId;
     }
-    const players = window._gdPlayers || [];
+    const players = window._gdPlayers;
     const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
-
     const calledUpCount = existingGP.filter(r=>r.calledUp).length;
 
     el.innerHTML = `
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Tap a player to mark them as called up, then choose Starter or Sub. Tap again to remove them.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Tick <strong>Played</strong>, choose Starter/Sub, then fill in Goals and Assists. Everything saves as you type — just tap elsewhere or move to the next field.</p>
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Called up: <strong style="color:var(--dark)">${calledUpCount}</strong> / ${players.length}</div>
-      <div class="who-played-list">
-        ${players.map(p => {
-          const gp = existingGP.find(r=>r.playerId===p.playerId) || {};
-          const calledUp = !!gp.calledUp;
-          const role = gp.role || 'Not Called';
-          return `
-          <div class="wp-row ${calledUp?'wp-active':''}" id="wp-${p.playerId}">
-            <div class="wp-info" onclick="toggleWhoPlayed(${gameId},${p.playerId})">
-              <span class="wp-num">${p.shirtNumber||'—'}</span>
-              <span class="wp-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor">${esc(p.trackingLabel||'★')}</span>`:''}</span>
-              <span class="wp-pos">${p.primaryPosition||''}</span>
-            </div>
-            <div class="wp-role-toggle" style="${calledUp?'':'display:none'}" id="wp-roles-${p.playerId}">
-              <button class="wp-role-btn ${role==='Starter'?'wp-role-active':''}" onclick="setPlayerRole(${gameId},${p.playerId},'Starter')">Starter</button>
-              <button class="wp-role-btn ${role==='Sub'?'wp-role-active':''}" onclick="setPlayerRole(${gameId},${p.playerId},'Sub')">Sub</button>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  // ── TAB 2 — GOALS (with per-goal assist) ─────────────────────────────────────
-  async function renderGoalsTab(gameId) {
-    const el = document.getElementById('gdPanel-goals');
-    if (!el) return;
-    if (!window._gdPlayers || !window._gdPlayers.length) {
-      window._gdPlayers = (await DB.getAll('players','seasonId', State.currentSeasonId)).filter(p=>p.isActive).sort((a,b)=>(a.shirtNumber||99)-(b.shirtNumber||99));
-      window._gdGameId = gameId;
-    }
-    const allPlayers = window._gdPlayers || [];
-    const [existingGP, goalEvents] = await Promise.all([
-      DB.getAll('gamePlayers','gameId',gameId),
-      DB.getAll('goalEvents','gameId',gameId)
-    ]);
-    const calledUp = allPlayers.filter(p => {
-      const gp = existingGP.find(r=>r.playerId===p.playerId);
-      return gp && gp.calledUp;
-    });
-
-    if (!calledUp.length) {
-      el.innerHTML = `<div class="empty"><strong>No players called up yet</strong><p>Go to "Who Played" and tap a player's name to call them up — then come back here.</p><button class="btn btn-primary" onclick="switchGameDetailTab(${gameId},'played')">Go to Who Played</button>
-      <p style="margin-top:16px;font-size:10px;color:#ccc;font-family:monospace">debug: total players ${allPlayers.length}, gamePlayers rows ${existingGP.length}, calledUp rows ${existingGP.filter(r=>r.calledUp).length}</p>
-      </div>`;
-      return;
-    }
-
-    el.innerHTML = `
-      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Tap + every time a player scores. You'll be asked who assisted — optional, skip if unknown.</p>
-      <div class="goals-list">
-        ${calledUp.map(p => {
-          const myGoals = goalEvents.filter(g=>g.scorerId===p.playerId).length;
-          const myAssists = goalEvents.filter(g=>g.assistId===p.playerId).length;
-          return `
-          <div class="goal-row" id="goal-row-${p.playerId}">
-            <div class="goal-info">
-              <span class="wp-num">${p.shirtNumber||'—'}</span>
-              <span class="wp-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))}</span>
-              ${myAssists?`<span class="badge-assist-tag">${myAssists} ast</span>`:''}
-            </div>
-            <div class="goal-stepper">
-              <button class="stepper-btn" onclick="removeLastGoal(${gameId},${p.playerId})" ${myGoals===0?'disabled':''}>&minus;</button>
-              <span class="stepper-count" id="goal-count-${p.playerId}">${myGoals}</span>
-              <button class="stepper-btn stepper-btn-add" onclick="addGoal(${gameId},${p.playerId})">+</button>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    `;
-  }
-
-  // ── TAB 3 — DETAILS (secondary) ──────────────────────────────────────────────
-  async function renderGameDetailsTab(gameId) {
-    const el = document.getElementById('gdPanel-details');
-    if (!el) return;
-    if (!window._gdPlayers || !window._gdPlayers.length) {
-      window._gdPlayers = (await DB.getAll('players','seasonId', State.currentSeasonId)).filter(p=>p.isActive).sort((a,b)=>(a.shirtNumber||99)-(b.shirtNumber||99));
-      window._gdGameId = gameId;
-    }
-    const allPlayers = window._gdPlayers || [];
-    const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
-    const calledUp = allPlayers.filter(p => {
-      const gp = existingGP.find(r=>r.playerId===p.playerId);
-      return gp && gp.calledUp;
-    });
-
-    if (!calledUp.length) {
-      el.innerHTML = `<div class="empty"><strong>No players called up yet</strong><p>Go to "Who Played" first.</p><button class="btn btn-primary" onclick="switchGameDetailTab(${gameId},'played')">Go to Who Played</button>
-      <p style="margin-top:16px;font-size:10px;color:#ccc;font-family:monospace">debug: total players ${allPlayers.length}, gamePlayers rows ${existingGP.length}, calledUp rows ${existingGP.filter(r=>r.calledUp).length}</p>
-      </div>`;
-      return;
-    }
-
-    el.innerHTML = `
-      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Optional — position played, cards, captain, Man of the Match, and notes.</p>
       <div class="game-detail-table-wrap">
         <table class="game-detail-table">
           <thead><tr>
-            <th class="col-sticky-num">#</th><th class="col-sticky-name">Player</th>
-            <th>Full Game</th><th>Pos Played</th><th>YC</th><th>RC</th><th>MoM</th><th>Captain</th><th>Notes</th>
+            <th class="col-sticky-num">#</th>
+            <th class="col-sticky-name">Player</th>
+            <th>Played</th>
+            <th>Role</th>
+            <th>Goals</th>
+            <th>Assists</th>
+            <th>Notes</th>
           </tr></thead>
           <tbody>
-          ${calledUp.map(p => {
+          ${players.map(p => {
             const gp = existingGP.find(r=>r.playerId===p.playerId) || {};
-            const isSub = gp.role==='Sub';
-            return `<tr id="gdr-${p.playerId}">
+            const calledUp = !!gp.calledUp;
+            return `<tr id="sgr-${p.playerId}">
               <td class="col-sticky-num">${p.shirtNumber||'—'}</td>
-              <td class="col-sticky-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))}</td>
-              <td class="td-center"><input type="checkbox" id="fg-${p.playerId}" ${gp.playedFullGame?'checked':''} ${isSub?'disabled':''} onchange="saveGameDetailField(${gameId},${p.playerId})"></td>
-              <td><select id="pp-${p.playerId}" onchange="saveGameDetailField(${gameId},${p.playerId})">
-                <option value="">—</option>
-                ${CONFIG.POSITIONS.map(pos=>`<option ${gp.positionPlayed===pos?'selected':''}>${pos}</option>`).join('')}
-              </select></td>
-              <td><select id="yc-${p.playerId}" style="width:46px" onchange="saveGameDetailField(${gameId},${p.playerId})">
-                ${[0,1,2].map(i=>`<option value="${i}" ${(gp.yellowCards||0)===i?'selected':''}>${i}</option>`).join('')}
-              </select></td>
-              <td><select id="rc-${p.playerId}" style="width:46px" onchange="saveGameDetailField(${gameId},${p.playerId})">
-                ${[0,1].map(i=>`<option value="${i}" ${(gp.redCards||0)===i?'selected':''}>${i}</option>`).join('')}
-              </select></td>
-              <td class="td-center"><input type="checkbox" id="mom-${p.playerId}" ${gp.playerOfTheMatch?'checked':''} onchange="enforceSingleMoM(${gameId},${p.playerId})"></td>
-              <td class="td-center"><input type="checkbox" id="cap-${p.playerId}" ${gp.captain?'checked':''} onchange="enforceSingleCaptain(${gameId},${p.playerId})"></td>
-              <td><input type="text" placeholder="Notes..." value="${esc(gp.performanceNotes||'')}" id="pn-${p.playerId}" onchange="saveGameDetailField(${gameId},${p.playerId})"></td>
+              <td class="col-sticky-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor">${esc(p.trackingLabel||'★')}</span>`:''}</td>
+              <td class="td-center">
+                <input type="checkbox" ${calledUp?'checked':''} onchange="simpleSetCalledUp(${gameId},${p.playerId},this.checked)">
+              </td>
+              <td>
+                <select onchange="simpleSetRole(${gameId},${p.playerId},this.value)" ${!calledUp?'disabled':''} style="width:80px">
+                  <option value="Sub" ${gp.role==='Sub'?'selected':''}>Sub</option>
+                  <option value="Starter" ${gp.role==='Starter'?'selected':''}>Starter</option>
+                </select>
+              </td>
+              <td>
+                <input type="number" min="0" max="20" value="${gp.goals||0}" ${!calledUp?'disabled':''} style="width:50px" onchange="simpleSetField(${gameId},${p.playerId},'goals',this.value)">
+              </td>
+              <td>
+                <input type="number" min="0" max="20" value="${gp.assists||0}" ${!calledUp?'disabled':''} style="width:50px" onchange="simpleSetField(${gameId},${p.playerId},'assists',this.value)">
+              </td>
+              <td>
+                <input type="text" placeholder="Notes..." value="${esc(gp.performanceNotes||'')}" ${!calledUp?'disabled':''} style="width:120px" onchange="simpleSetNotes(${gameId},${p.playerId},this.value)">
+              </td>
             </tr>`;
           }).join('')}
           </tbody>
         </table>
       </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--muted)">* Estimated minutes: Full game = ${CONFIG.FULL_GAME_MINS} mins, Sub/Partial = ${CONFIG.PARTIAL_GAME_MINS} mins</div>
     `;
   }
 
@@ -3843,6 +3796,41 @@ function fmtDate(d) {
   if (parts.length===3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
   return d;
 }
+
+// Maps common nationality text to a flag emoji. Falls back to a globe if unknown.
+// Handles simple "/" separated dual nationality (e.g. "Portuguese/Italian").
+const NATIONALITY_FLAGS = {
+  'portuguese':'&#127477;&#127481;','portugal':'&#127477;&#127481;',
+  'italian':'&#127470;&#127481;','italy':'&#127470;&#127481;',
+  'spanish':'&#127466;&#127480;','spain':'&#127466;&#127480;',
+  'french':'&#127467;&#127479;','france':'&#127467;&#127479;',
+  'brazilian':'&#127463;&#127479;','brazil':'&#127463;&#127479;',
+  'english':'&#127468;&#127463;','england':'&#127468;&#127463;',
+  'british':'&#127468;&#127463;',
+  'german':'&#127465;&#127466;','germany':'&#127465;&#127466;',
+  'angolan':'&#127462;&#127476;','angola':'&#127462;&#127476;',
+  'cape verdean':'&#127465;&#127465;','cape verde':'&#127465;&#127465;',
+  'mozambican':'&#127474;&#127487;','mozambique':'&#127474;&#127487;',
+  'american':'&#127482;&#127480;','usa':'&#127482;&#127480;',
+};
+
+function getFlagsForNationality(nat) {
+  if (!nat) return '';
+  const parts = nat.split('/').map(s => s.trim().toLowerCase());
+  const flags = parts.map(p => NATIONALITY_FLAGS[p] || '').filter(Boolean);
+  return flags.length ? flags.join(' ') : '&#127760;'; // globe fallback
+}
+
+function calcAge(dob) {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (isNaN(birth)) return null;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--;
+  return age;
+}
 function fmtDateTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -4489,6 +4477,63 @@ async function savePlayer() {
   await Render.squad();
 }
 
+async function openPlayerCardPopup(playerId) {
+  const p = await DB.get('players', playerId);
+  if (!p) return;
+  const el = document.getElementById('playerCardContent');
+  const age = calcAge(p.dateOfBirth);
+  const initials = (p.fullName||'').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const flags = getFlagsForNationality(p.nationality);
+
+  el.innerHTML = `
+    <div class="pc-header">
+      ${p.photoUrl
+        ? `<img class="pc-photo" src="${esc(p.photoUrl)}" onerror="this.outerHTML='<div class=&quot;pc-photo-fallback&quot;>${initials}</div>'">`
+        : `<div class="pc-photo-fallback">${initials}</div>`}
+      <div>
+        <div class="pc-name">${esc(p.displayName || shortName(p.fullName))}</div>
+        <div class="pc-shirt">#${p.shirtNumber||'—'} · ${esc(p.primaryPosition||'—')}</div>
+      </div>
+      <button class="pc-close" onclick="closePlayerCardPopup()">&times;</button>
+    </div>
+    <div class="pc-body">
+      <div class="pc-section-title">Dados Pessoais</div>
+      <div class="pc-row">
+        <div class="pc-label">Nome</div>
+        <div class="pc-value">${esc(p.fullName)}</div>
+      </div>
+      <div class="pc-row">
+        <div class="pc-label">Data de Nascimento</div>
+        <div class="pc-value">${p.dateOfBirth?fmtDate(p.dateOfBirth):'—'}${age!==null?` (${age} anos)`:''}</div>
+      </div>
+      <div class="pc-row">
+        <div class="pc-label">Nacionalidade</div>
+        <div class="pc-value">${flags} ${esc(p.nationality||'—')}</div>
+      </div>
+      <div class="pc-row">
+        <div class="pc-label">Posição</div>
+        <div class="pc-value">${esc(p.primaryPosition||'—')}${p.secondaryPosition?` / ${esc(p.secondaryPosition)}`:''}</div>
+      </div>
+      <div class="pc-row">
+        <div class="pc-label">Pé Preferencial</div>
+        <div class="pc-value">${esc(p.dominantFoot||'—')}</div>
+      </div>
+      <div class="pc-row">
+        <div class="pc-label">Situação</div>
+        <div class="pc-value">${p.isActive?'No ativo':'Arquivado'}</div>
+      </div>
+    </div>
+    <div class="pc-footer">
+      <button class="btn btn-secondary btn-sm" onclick="closePlayerCardPopup();editPlayer(${p.playerId})">&#9999; Edit Player</button>
+    </div>
+  `;
+  document.getElementById('playerCardOverlay').classList.add('open');
+}
+
+function closePlayerCardPopup() {
+  document.getElementById('playerCardOverlay').classList.remove('open');
+}
+
 async function editPlayer(id) {
   const p = await DB.get('players', id);
   if (!p) return;
@@ -4625,9 +4670,7 @@ async function goToGameDetail(gameId) {
 async function openGameDetail(gameId) {
   document.getElementById('gamesListView').style.display = 'none';
   document.getElementById('gameDetailView').style.display = 'block';
-  // Always start on "Who Played" when opening a game fresh
-  State.gameDetailTab = 'played';
-  await Render.gameDetail(gameId, 'played');
+  await Render.gameDetail(gameId);
   window.scrollTo(0,0);
 }
 
@@ -4637,28 +4680,14 @@ function closeGameDetail() {
   Render.gamesList();
 }
 
-// ── TAB SWITCHING ────────────────────────────────────────────────────────────
-async function switchGameDetailTab(gameId, tab) {
-  State.gameDetailTab = tab;
-  ['played','goals','details'].forEach(t => {
-    const panel = document.getElementById(`gdPanel-${t}`);
-    const btn   = document.getElementById(`gdtab-${t}`);
-    if (panel) panel.style.display = t === tab ? '' : 'none';
-    if (btn)   btn.classList.toggle('active-tab', t === tab);
-  });
-  if (tab === 'played')  await renderWhoPlayedTab(gameId);
-  if (tab === 'goals')   await renderGoalsTab(gameId);
-  if (tab === 'details') await renderGameDetailsTab(gameId);
-}
-
-// ── HELPER: get or create a gamePlayers record ───────────────────────────────
+// ── SIMPLE GAME TABLE HANDLERS — every change re-renders the whole table ────
 async function getOrCreateGP(gameId, playerId) {
   const all = await DB.getAll('gamePlayers','gameId',gameId);
   let gp = all.find(r => r.playerId === playerId);
   if (!gp) {
     gp = {
       gameId, playerId, seasonId: State.currentSeasonId,
-      calledUp: false, role: 'Not Called', playedFullGame: false,
+      calledUp: false, role: 'Sub', playedFullGame: false,
       positionPlayed: null, goals: 0, assists: 0,
       yellowCards: 0, redCards: 0, playerOfTheMatch: false, captain: false,
       performanceNotes: null,
@@ -4667,124 +4696,57 @@ async function getOrCreateGP(gameId, playerId) {
   return gp;
 }
 
-function countCurrentStartersFromGP(allGP, excludePlayerId) {
-  return allGP.filter(r => r.role === 'Starter' && r.playerId !== excludePlayerId).length;
+function countStartersExcluding(allGP, excludePlayerId) {
+  return allGP.filter(r => r.role === 'Starter' && r.calledUp && r.playerId !== excludePlayerId).length;
 }
 
-// ── TAB 1 HANDLERS — WHO PLAYED ───────────────────────────────────────────────
-async function toggleWhoPlayed(gameId, playerId) {
+async function simpleSetCalledUp(gameId, playerId, checked) {
   const gp = await getOrCreateGP(gameId, playerId);
-  console.log('[toggleWhoPlayed] before:', JSON.parse(JSON.stringify(gp)));
-
-  if (gp.calledUp) {
-    gp.calledUp = false;
-    gp.role = 'Not Called';
-    gp.playedFullGame = false;
-    const savedId = await DB.put('gamePlayers', gp);
-    console.log('[toggleWhoPlayed] removed, saved id:', savedId, gp);
-    Toast.show('Removed from squad.');
-  } else {
-    gp.calledUp = true;
+  gp.calledUp = checked;
+  if (!checked) {
     gp.role = 'Sub';
-    const savedId = await DB.put('gamePlayers', gp);
-    console.log('[toggleWhoPlayed] added, saved id:', savedId, gp);
-    Toast.show('Marked as played.');
+    gp.playedFullGame = false;
   }
-  // Verify the write actually persisted before re-rendering
-  const verify = await DB.getAll('gamePlayers','gameId',gameId);
-  console.log('[toggleWhoPlayed] verify all gamePlayers for game:', verify);
-  await renderWhoPlayedTab(gameId);
+  await DB.put('gamePlayers', gp);
+  await renderSimpleGameTable(gameId);
   await refreshGameHeaderScore(gameId);
 }
 
-async function setPlayerRole(gameId, playerId, role) {
+async function simpleSetRole(gameId, playerId, role) {
   const allGP = await DB.getAll('gamePlayers','gameId',gameId);
-  const gp = await getOrCreateGP(gameId, playerId);
-
   if (role === 'Starter') {
-    const starterCount = countCurrentStartersFromGP(allGP, playerId);
+    const starterCount = countStartersExcluding(allGP, playerId);
     if (starterCount >= 11) {
       Toast.error('Maximum 11 Starters. Remove a Starter before adding another.');
+      await renderSimpleGameTable(gameId); // revert the dropdown visually
       return;
     }
-    gp.playedFullGame = true;
-  } else {
-    gp.playedFullGame = false;
   }
+  const gp = await getOrCreateGP(gameId, playerId);
   gp.calledUp = true;
   gp.role = role;
+  gp.playedFullGame = (role === 'Starter');
   await DB.put('gamePlayers', gp);
-  await renderWhoPlayedTab(gameId);
+  await renderSimpleGameTable(gameId);
 }
 
-// ── TAB 2 HANDLERS — GOALS (with optional assist) ────────────────────────────
-async function addGoal(gameId, scorerId) {
-  // Ask for optional assist via a quick picker
-  const allPlayers = window._gdPlayers || [];
-  const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
-  const calledUp = allPlayers.filter(p => {
-    const gp = existingGP.find(r=>r.playerId===p.playerId);
-    return gp && gp.calledUp && p.playerId !== scorerId;
-  });
-  openAssistPicker(gameId, scorerId, calledUp);
-}
-
-function openAssistPicker(gameId, scorerId, candidates) {
-  const overlay = document.createElement('div');
-  overlay.className = 'rm-form-overlay open';
-  overlay.id = 'assistPickerOverlay';
-  overlay.innerHTML = `
-    <div class="rm-form" style="width:380px">
-      <h2>Who Assisted?</h2>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Optional — skip if you don't know, or there was no assist.</p>
-      <div style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto">
-        ${candidates.map(p => `
-          <button class="btn btn-secondary" style="text-align:left;justify-content:flex-start" onclick="confirmGoal(${gameId},${scorerId},${p.playerId})">
-            ${p.shirtNumber||'—'} · ${esc(shortName(p.fullName))}
-          </button>`).join('')}
-      </div>
-      <div class="form-actions" style="margin-top:14px">
-        <button class="btn btn-primary" onclick="confirmGoal(${gameId},${scorerId},null)">No Assist / Skip</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-}
-
-async function confirmGoal(gameId, scorerId, assistId) {
-  document.getElementById('assistPickerOverlay')?.remove();
-  await DB.put('goalEvents', { gameId, scorerId, assistId: assistId||null, createdAt: new Date().toISOString() });
-  await recalcGoalsAssists(gameId);
-  await renderGoalsTab(gameId);
+async function simpleSetField(gameId, playerId, field, value) {
+  const gp = await getOrCreateGP(gameId, playerId);
+  gp[field] = parseInt(value) || 0;
+  await DB.put('gamePlayers', gp);
   await refreshGameHeaderScore(gameId);
-  Toast.show('Goal added.');
-}
-
-async function removeLastGoal(gameId, scorerId) {
-  const events = await DB.getAll('goalEvents','gameId',gameId);
-  const mine = events.filter(e => e.scorerId === scorerId)
-    .sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
-  if (!mine.length) return;
-  await DB.del('goalEvents', mine[0].goalEventId);
-  await recalcGoalsAssists(gameId);
-  await renderGoalsTab(gameId);
-  await refreshGameHeaderScore(gameId);
-  Toast.show('Last goal removed.');
-}
-
-// Recalculates gamePlayers.goals/assists from goalEvents — keeps existing
-// displays (Match Log, Team Summary, etc.) working unchanged.
-async function recalcGoalsAssists(gameId) {
-  const events = await DB.getAll('goalEvents','gameId',gameId);
-  const allGP = await DB.getAll('gamePlayers','gameId',gameId);
-  for (const gp of allGP) {
-    const goals = events.filter(e => e.scorerId === gp.playerId).length;
-    const assists = events.filter(e => e.assistId === gp.playerId).length;
-    if (gp.goals !== goals || gp.assists !== assists) {
-      gp.goals = goals;
-      gp.assists = assists;
-      await DB.put('gamePlayers', gp);
-    }
+  // Only the score header needs updating live; no full re-render needed
+  // for a single number field, but we keep it consistent and cheap:
+  if (field === 'goals') {
+    const row = document.getElementById(`sgr-${playerId}`);
+    if (row) { /* value already reflects what was typed, no redraw needed */ }
   }
+}
+
+async function simpleSetNotes(gameId, playerId, value) {
+  const gp = await getOrCreateGP(gameId, playerId);
+  gp.performanceNotes = value.trim() || null;
+  await DB.put('gamePlayers', gp);
 }
 
 async function refreshGameHeaderScore(gameId) {
@@ -4799,50 +4761,6 @@ async function refreshGameHeaderScore(gameId) {
   const resultEl = document.getElementById('liveResult');
   if (scoreEl) scoreEl.textContent = `${s.home} — ${s.away}`;
   if (resultEl) { resultEl.textContent = res; resultEl.className = `badge badge-${res}`; }
-}
-
-// ── TAB 3 HANDLERS — DETAILS (autosave per field) ────────────────────────────
-async function saveGameDetailField(gameId, playerId) {
-  const gp = await getOrCreateGP(gameId, playerId);
-  const fgEl = document.getElementById(`fg-${playerId}`);
-  const ppEl = document.getElementById(`pp-${playerId}`);
-  const ycEl = document.getElementById(`yc-${playerId}`);
-  const rcEl = document.getElementById(`rc-${playerId}`);
-  const pnEl = document.getElementById(`pn-${playerId}`);
-  if (fgEl && gp.role !== 'Sub') gp.playedFullGame = fgEl.checked;
-  if (ppEl) gp.positionPlayed = ppEl.value || null;
-  if (ycEl) gp.yellowCards = parseInt(ycEl.value)||0;
-  if (rcEl) gp.redCards = parseInt(rcEl.value)||0;
-  if (pnEl) gp.performanceNotes = pnEl.value.trim()||null;
-  await DB.put('gamePlayers', gp);
-}
-
-async function enforceSingleMoM(gameId, playerId) {
-  const checked = document.getElementById(`mom-${playerId}`)?.checked;
-  const allGP = await DB.getAll('gamePlayers','gameId',gameId);
-  for (const gp of allGP) {
-    const shouldBe = checked && gp.playerId === playerId;
-    if (gp.playerOfTheMatch !== shouldBe) {
-      gp.playerOfTheMatch = shouldBe;
-      await DB.put('gamePlayers', gp);
-    }
-    const el = document.getElementById(`mom-${gp.playerId}`);
-    if (el && gp.playerId !== playerId) el.checked = false;
-  }
-}
-
-async function enforceSingleCaptain(gameId, playerId) {
-  const checked = document.getElementById(`cap-${playerId}`)?.checked;
-  const allGP = await DB.getAll('gamePlayers','gameId',gameId);
-  for (const gp of allGP) {
-    const shouldBe = checked && gp.playerId === playerId;
-    if (gp.captain !== shouldBe) {
-      gp.captain = shouldBe;
-      await DB.put('gamePlayers', gp);
-    }
-    const el = document.getElementById(`cap-${gp.playerId}`);
-    if (el && gp.playerId !== playerId) el.checked = false;
-  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -5082,6 +5000,24 @@ document.addEventListener('click', async e => {
 async function init() {
   try {
     await DB.open();
+
+    // ── Verify schema upgrade actually completed ──────────────────────────────
+    // If a store is missing, the IndexedDB upgrade didn't run (version mismatch
+    // or interrupted upgrade). Force a clean reopen rather than running silently
+    // broken for the rest of the session.
+    const requiredStores = ['appMeta','seasons','players','games','gamePlayers','goalEvents','events','playerGameStats','achievements','clubHistory'];
+    const missing = requiredStores.filter(s => !DB.hasStore(s));
+    if (missing.length) {
+      console.error('[init] Missing IndexedDB stores after open:', missing);
+      document.getElementById('loading').innerHTML = `
+        <div style="text-align:center;padding:24px;max-width:340px">
+          <p style="color:#b03030;font-weight:700;margin-bottom:10px">Database needs an update</p>
+          <p style="font-size:12px;color:#666;margin-bottom:16px">A new version added features that need a one-time database upgrade. Missing: ${missing.join(', ')}</p>
+          <button class="btn btn-primary" onclick="location.reload(true)">Reload App</button>
+        </div>`;
+      return;
+    }
+
     await loadMeta();
     await Sync.loadConfig();
 
