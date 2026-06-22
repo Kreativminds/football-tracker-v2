@@ -4833,6 +4833,7 @@ async function renderSimpleGoalsTab(gameId) {
   gdDebugLog(`renderSimpleGoalsTab START, el found=${!!el}`);
   if (!el) { gdDebugLog('ABORTED: #gdPanel-goals not found'); return; }
   try {
+    const game = await DB.get('games', gameId);
     const allPlayers = window._gdPlayers || [];
     const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
     const squad = allPlayers.filter(p => {
@@ -4841,12 +4842,24 @@ async function renderSimpleGoalsTab(gameId) {
     });
     gdDebugLog(`goals tab: squad size=${squad.length}`);
 
+    const oppScoreField = `
+      <div class="card" style="margin-bottom:14px;padding:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-weight:700;font-size:13px">${esc(game?.opponent||'Opponent')}</div>
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Their Score</div>
+          </div>
+          <input type="number" min="0" max="30" value="${game?.opponentScore||0}" style="width:64px;font-size:18px;font-weight:700;text-align:center;border:1px solid var(--border);border-radius:6px;padding:6px" onchange="simpleSetOpponentScore(${gameId},this.value)">
+        </div>
+      </div>`;
+
     if (!squad.length) {
-      el.innerHTML = `<div class="empty"><strong>No squad selected yet</strong><p>Go to "Squad List" first.</p><button class="btn btn-primary" onclick="switchSimpleTab(${gameId},'squad')">Go to Squad List</button></div>`;
+      el.innerHTML = oppScoreField + `<div class="empty"><strong>No squad selected yet</strong><p>Go to "Squad List" first.</p><button class="btn btn-primary" onclick="switchSimpleTab(${gameId},'squad')">Go to Squad List</button></div>`;
       return;
     }
 
     el.innerHTML = `
+      ${oppScoreField}
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Enter goals and assists for anyone in the squad — Starter or Sub.</p>
       <div class="goals-list">
         ${squad.map(p => {
@@ -4885,6 +4898,21 @@ async function simpleSetField(gameId, playerId, field, value) {
     gp[field] = parseInt(value) || 0;
     const key = await DB.put('gamePlayers', gp);
     gdDebugLog(`DB.put OK key=${key} ${field} now=${gp[field]}`);
+    await refreshGameHeaderScore(gameId);
+  } catch(err) {
+    gdDebugLog(`ERROR: ${err.message}`);
+    Toast.error('Could not save: ' + err.message);
+  }
+}
+
+async function simpleSetOpponentScore(gameId, value) {
+  gdDebugLog(`CHANGE opponentScore value=${value}`);
+  try {
+    const game = await DB.get('games', gameId);
+    if (!game) return;
+    game.opponentScore = parseInt(value) || 0;
+    const key = await DB.put('games', game);
+    gdDebugLog(`DB.put OK key=${key} opponentScore now=${game.opponentScore}`);
     await refreshGameHeaderScore(gameId);
   } catch(err) {
     gdDebugLog(`ERROR: ${err.message}`);
