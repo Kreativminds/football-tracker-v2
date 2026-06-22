@@ -207,6 +207,13 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 .prog-wrap{margin:6px 0}
 .prog-bar{height:4px;background:#e8e8e8;border-radius:2px;overflow:hidden}
 .prog-fill{height:100%;background:var(--black);border-radius:2px}
+/* ── FIELD VISIBILITY TOGGLE SWITCH ── */
+.fv-switch{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+.fv-switch input{opacity:0;width:0;height:0}
+.fv-slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:24px;transition:.15s}
+.fv-slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.15s}
+.fv-switch input:checked + .fv-slider{background:#111}
+.fv-switch input:checked + .fv-slider:before{transform:translateX(18px)}
 .prog-label{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px}
 
 /* ── FORM BADGES (recent form) ────────────────────────────────────────────── */
@@ -529,9 +536,11 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px;overflow-x:auto">
       <button class="import-tab active-tab" id="atab-roadmap" onclick="switchAdminTab('roadmap')">&#128202; Roadmap</button>
       <button class="import-tab" id="atab-kanban" onclick="switchAdminTab('kanban')">&#9646;&#9646; Kanban</button>
+      <button class="import-tab" id="atab-fields" onclick="switchAdminTab('fields')">&#128065; Field Visibility</button>
     </div>
     <div id="admin-panel-roadmap"></div>
     <div id="admin-panel-kanban" style="display:none"></div>
+    <div id="admin-panel-fields" style="display:none"></div>
   </div>
 
   <!-- HELP PAGE -->
@@ -1329,12 +1338,13 @@ async function initAdmin() {
 
 // ── Admin tab switching ────────────────────────────────────────────────────────
 function switchAdminTab(tab) {
-  ['roadmap','kanban'].forEach(t => {
+  ['roadmap','kanban','fields'].forEach(t => {
     document.getElementById(`admin-panel-${t}`).style.display = t === tab ? '' : 'none';
     document.getElementById(`atab-${t}`)?.classList.toggle('active-tab', t === tab);
   });
   if (tab === 'roadmap') renderRoadmapTable();
   if (tab === 'kanban')  renderKanban();
+  if (tab === 'fields')  renderFieldVisibilityTab();
 }
 
 // ── Render roadmap table ───────────────────────────────────────────────────────
@@ -1742,9 +1752,92 @@ const EXT_STAT_FIELDS = [
   ]},
 ];
 
+// ── FIELD VISIBILITY CONFIG ──────────────────────────────────────────────────
+// Stored in appMeta as a single JSON object. Defaults to everything visible
+// if no config exists, so nothing changes until the admin disables something.
+let _fieldVisibilityCache = null;
+
+async function getFieldVisibility() {
+  if (_fieldVisibilityCache) return _fieldVisibilityCache;
+  const meta = await DB.get('appMeta', 'fieldVisibility');
+  const config = meta?.value || {};
+  // Build defaults (true) for any field not explicitly set
+  const defaults = {};
+  EXT_STAT_FIELDS.forEach(section => section.fields.forEach(f => {
+    defaults[f.key] = config.hasOwnProperty(f.key) ? config[f.key] : true;
+  }));
+  _fieldVisibilityCache = defaults;
+  return defaults;
+}
+
+async function saveFieldVisibility(config) {
+  await DB.put('appMeta', { metaKey: 'fieldVisibility', value: config });
+  _fieldVisibilityCache = config;
+}
+
+function isFieldVisible(key) {
+  if (!_fieldVisibilityCache) return true; // not loaded yet, fail open
+  return _fieldVisibilityCache[key] !== false;
+}
+
+function isSectionFullyHidden(section) {
+  if (!_fieldVisibilityCache) return false;
+  return section.fields.every(f => _fieldVisibilityCache[f.key] === false);
+}
+
+async function renderFieldVisibilityTab() {
+  const el = document.getElementById('admin-panel-fields');
+  if (!el) return;
+  await getFieldVisibility(); // ensure cache loaded
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:14px">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:0">Turn off stats you don't want to track. Hidden fields disappear from entry forms and totals for every tracked player — but any data already recorded is kept and will reappear if you turn the field back on.</p>
+    </div>
+    ${EXT_STAT_FIELDS.map(section => {
+      const allOff = isSectionFullyHidden(section);
+      return `
+      <div class="card" style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div class="card-title" style="margin-bottom:0">${section.section}</div>
+          <button class="btn btn-secondary btn-sm" onclick="toggleEntireSection('${section.section}', ${!allOff})">${allOff ? 'Show All' : 'Hide All'}</button>
+        </div>
+        ${section.fields.map(f => `
+          <div class="info-row">
+            <span class="ir-label">${f.label}</span>
+            <label class="fv-switch">
+              <input type="checkbox" ${isFieldVisible(f.key)?'checked':''} onchange="toggleFieldVisibility('${f.key}', this.checked)">
+              <span class="fv-slider"></span>
+            </label>
+          </div>`).join('')}
+      </div>`;
+    }).join('')}
+  `;
+}
+
+async function toggleFieldVisibility(key, visible) {
+  const config = await getFieldVisibility();
+  config[key] = visible;
+  await saveFieldVisibility(config);
+  Toast.show(visible ? 'Field shown.' : 'Field hidden.');
+  await renderFieldVisibilityTab();
+}
+
+async function toggleEntireSection(sectionName, makeVisible) {
+  const section = EXT_STAT_FIELDS.find(s => s.section === sectionName);
+  if (!section) return;
+  const config = await getFieldVisibility();
+  section.fields.forEach(f => { config[f.key] = makeVisible; });
+  await saveFieldVisibility(config);
+  Toast.show(makeVisible ? `${sectionName} shown.` : `${sectionName} hidden.`);
+  await renderFieldVisibilityTab();
+}
+
 async function renderExtendedStats(playerId) {
   const el = document.getElementById(`tracked-stats-${playerId}`);
   if (!el) return;
+
+  await getFieldVisibility(); // ensure cache loaded before filtering
 
   const players = await DB.getAll('players','seasonId',State.currentSeasonId);
   const player = players.find(p => p.playerId === playerId);
@@ -1756,25 +1849,32 @@ async function renderExtendedStats(playerId) {
 
   const allPGS = await DB.getAll('playerGameStats','playerId',playerId);
 
-  // Calculate season totals
+  // Calculate season totals (still computed for ALL fields — hiding is display-only)
   const totals = {};
   EXT_STAT_FIELDS.forEach(s => s.fields.forEach(f => {
     totals[f.key] = allPGS.reduce((sum,r) => sum+(parseInt(r[f.key])||0), 0);
   }));
 
+  // Only sections/fields that are visible get shown
+  const visibleSections = EXT_STAT_FIELDS
+    .map(section => ({ ...section, fields: section.fields.filter(f => isFieldVisible(f.key)) }))
+    .filter(section => section.fields.length > 0);
+
   // Computed percentages
   const pct = (a,b) => b>0 ? Math.round(a/b*100) : '—';
-  const dribblePct  = pct(totals.dribblesCompleted, totals.dribblesAttempted);
-  const passPct     = pct(totals.passesCompleted, totals.passesAttempted);
-  const tacklePct   = pct(totals.tacklesWon, totals.tacklesAttempted);
-  const crossPct    = pct(totals.crossesCompleted, totals.crossesAttempted);
-  const duelPct     = pct(totals.duelsWon, totals.duelsAttempted);
+  const accuracyRows = [
+    ['Pass Accuracy', pct(totals.passesCompleted, totals.passesAttempted), totals.passesCompleted, totals.passesAttempted, ['passesCompleted','passesAttempted']],
+    ['Dribble Success', pct(totals.dribblesCompleted, totals.dribblesAttempted), totals.dribblesCompleted, totals.dribblesAttempted, ['dribblesCompleted','dribblesAttempted']],
+    ['Tackle Success', pct(totals.tacklesWon, totals.tacklesAttempted), totals.tacklesWon, totals.tacklesAttempted, ['tacklesWon','tacklesAttempted']],
+    ['Cross Accuracy', pct(totals.crossesCompleted, totals.crossesAttempted), totals.crossesCompleted, totals.crossesAttempted, ['crossesCompleted','crossesAttempted']],
+    ['Duel Success', pct(totals.duelsWon, totals.duelsAttempted), totals.duelsWon, totals.duelsAttempted, ['duelsWon','duelsAttempted']],
+  ].filter(row => row[4].every(key => isFieldVisible(key)));
 
   el.innerHTML = `
     <!-- Season Totals -->
     <div class="card">
       <div class="card-title">Season Totals — ${esc(player.fullName)}</div>
-      ${EXT_STAT_FIELDS.map(section => `
+      ${visibleSections.length ? visibleSections.map(section => `
         <div style="margin-bottom:12px">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px">${section.section}</div>
           <div class="stat-grid" style="margin-bottom:0">
@@ -1784,19 +1884,14 @@ async function renderExtendedStats(playerId) {
                 <div class="lbl">${f.label}</div>
               </div>`).join('')}
           </div>
-        </div>`).join('')}
+        </div>`).join('') : '<p style="font-size:12px;color:var(--muted)">All extended stats are currently hidden. Enable some in Admin → Field Visibility.</p>'}
     </div>
 
+    ${accuracyRows.length ? `
     <!-- Accuracy percentages -->
     <div class="card">
       <div class="card-title">Accuracy &amp; Success Rates</div>
-      ${[
-        ['Pass Accuracy', passPct, totals.passesCompleted, totals.passesAttempted],
-        ['Dribble Success', dribblePct, totals.dribblesCompleted, totals.dribblesAttempted],
-        ['Tackle Success', tacklePct, totals.tacklesWon, totals.tacklesAttempted],
-        ['Cross Accuracy', crossPct, totals.crossesCompleted, totals.crossesAttempted],
-        ['Duel Success', duelPct, totals.duelsWon, totals.duelsAttempted],
-      ].map(([label, pctVal, made, total]) => `
+      ${accuracyRows.map(([label, pctVal, made, total]) => `
         <div class="prog-wrap">
           <div class="prog-label">
             <span>${label}</span>
@@ -1804,9 +1899,10 @@ async function renderExtendedStats(playerId) {
           </div>
           <div class="prog-bar"><div class="prog-fill" style="width:${typeof pctVal==='number'?pctVal:0}%"></div></div>
         </div>`).join('')}
-    </div>
+    </div>` : ''}
 
     <!-- Per-game entry -->
+    ${visibleSections.length ? `
     <div class="card">
       <div class="card-title">Enter Stats by Game</div>
       ${games.length ? games.map(g => {
@@ -1825,7 +1921,7 @@ async function renderExtendedStats(playerId) {
               </div>
             </div>
             <div id="ext-form-${playerId}-${g.gameId}" style="display:none;padding:12px">
-              ${EXT_STAT_FIELDS.map(section => `
+              ${visibleSections.map(section => `
                 <div style="margin-bottom:10px">
                   <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:6px">${section.section}</div>
                   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
@@ -1844,7 +1940,7 @@ async function renderExtendedStats(playerId) {
             </div>
           </div>`;
       }).join('') : '<p style="font-size:12px;color:var(--muted)">No games logged yet.</p>'}
-    </div>`;
+    </div>` : ''}`;
 }
 
 function toggleExtStatForm(playerId, gameId) {
@@ -1854,16 +1950,24 @@ function toggleExtStatForm(playerId, gameId) {
 
 async function saveExtStats(playerId, gameId) {
   const allFields = EXT_STAT_FIELDS.flatMap(s => s.fields);
-  const record = { playerId, gameId, seasonId: State.currentSeasonId };
-  allFields.forEach(f => {
-    const el = document.getElementById(`ext-${playerId}-${gameId}-${f.key}`);
-    record[f.key] = el ? parseInt(el.value)||0 : 0;
-  });
 
-  // Check if record exists
+  // Check if record exists — start from existing values so hidden fields
+  // (no input on screen) keep their previously recorded data, not zeroed.
   const existing = await DB.getAll('playerGameStats','gameId',gameId);
   const prev = existing.find(r => r.playerId === playerId);
+
+  const record = { playerId, gameId, seasonId: State.currentSeasonId };
   if (prev) record.pgsId = prev.pgsId;
+
+  allFields.forEach(f => {
+    const el = document.getElementById(`ext-${playerId}-${gameId}-${f.key}`);
+    if (el) {
+      record[f.key] = parseInt(el.value)||0;
+    } else {
+      // Field is hidden — preserve whatever was already stored, default to 0 if none
+      record[f.key] = prev ? (prev[f.key]||0) : 0;
+    }
+  });
 
   await DB.put('playerGameStats', record);
   Toast.show('Stats saved.');
