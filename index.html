@@ -2934,7 +2934,7 @@ const Render = (() => {
                 <td class="col-sticky-num">${p.shirtNumber||'—'}</td>
                 <td class="col-sticky-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor">${esc(p.trackingLabel||'★')}</span>`:''}</td>
                 <td class="td-center">
-                  <input type="checkbox" ${calledUp?'checked':''} onchange="simpleSetCalledUp(${gameId},${p.playerId},this.checked)">
+                  <input type="checkbox" ${calledUp?'checked':''} onclick="simpleSetCalledUp(${gameId},${p.playerId},this.checked)">
                 </td>
                 <td>
                   <select onchange="simpleSetRole(${gameId},${p.playerId},this.value)" ${!calledUp?'disabled':''} style="width:80px">
@@ -4680,6 +4680,7 @@ async function goToGameDetail(gameId) {
 async function openGameDetail(gameId) {
   document.getElementById('gamesListView').style.display = 'none';
   document.getElementById('gameDetailView').style.display = 'block';
+  try { sessionStorage.setItem('squadTracker_openGameId', String(gameId)); } catch(e) {}
   await Render.gameDetail(gameId);
   window.scrollTo(0,0);
 }
@@ -4687,6 +4688,7 @@ async function openGameDetail(gameId) {
 function closeGameDetail() {
   document.getElementById('gamesListView').style.display = 'block';
   document.getElementById('gameDetailView').style.display = 'none';
+  try { sessionStorage.removeItem('squadTracker_openGameId'); } catch(e) {}
   Render.gamesList();
 }
 
@@ -4722,6 +4724,7 @@ async function simpleSetCalledUp(gameId, playerId, checked) {
       gp.role = 'Sub';
     }
     await DB.put('gamePlayers', gp);
+    Toast.show(checked ? 'Added to squad' : 'Removed from squad');
   } catch(err) {
     console.error('[simpleSetCalledUp] error:', err);
     Toast.error('Could not save: ' + err.message);
@@ -5083,6 +5086,13 @@ async function init() {
         const pid = parseInt(restoredSection.replace('tracked-',''));
         const savedTab = sessionStorage.getItem('squadTracker_trackedTab');
         if (savedTab) switchTrackedTab(pid, savedTab);
+      } else if (restoredSection === 'games') {
+        // If a specific game was open, reopen it directly instead of the list
+        const savedGameId = sessionStorage.getItem('squadTracker_openGameId');
+        if (savedGameId) {
+          const gameExists = await DB.get('games', parseInt(savedGameId));
+          if (gameExists) await openGameDetail(parseInt(savedGameId));
+        }
       }
     } catch(e) {}
 
