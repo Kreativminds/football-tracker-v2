@@ -2915,7 +2915,7 @@ const Render = (() => {
 
       el.innerHTML = `
         <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Tick <strong>Played</strong> for anyone in the squad. Choose Starter or Sub. Fill in Goals/Assists for anyone who scored.</p>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Played: <strong style="color:var(--dark)">${calledUpCount}</strong> / ${players.length} &nbsp;·&nbsp; Starters: <strong style="color:var(--dark)">${starterCount}</strong> / 11</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px" id="gdCounters">Played: <strong style="color:var(--dark)" id="gdPlayedCount">${calledUpCount}</strong> / ${players.length} &nbsp;·&nbsp; Starters: <strong style="color:var(--dark)" id="gdStarterCount">${starterCount}</strong> / 11</div>
         <div class="game-detail-table-wrap">
           <table class="game-detail-table">
             <thead><tr>
@@ -4731,6 +4731,7 @@ async function simpleSetCalledUp(gameId, playerId, checked) {
   } finally {
     await renderSimpleGameTable(gameId);
     await refreshGameHeaderScore(gameId);
+    await refreshGameCounters(gameId);
   }
 }
 
@@ -4756,6 +4757,7 @@ async function simpleSetRole(gameId, playerId, role) {
     Toast.error('Could not save: ' + err.message);
   } finally {
     await renderSimpleGameTable(gameId);
+    await refreshGameCounters(gameId);
   }
 }
 
@@ -4768,6 +4770,22 @@ async function simpleSetField(gameId, playerId, field, value) {
   } catch(err) {
     console.error('[simpleSetField] error:', err);
     Toast.error('Could not save: ' + err.message);
+  }
+}
+
+// Directly updates the Played/Starters counters without needing a full
+// table re-render. Called as an extra safety net after every change.
+async function refreshGameCounters(gameId) {
+  try {
+    const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
+    const playedEl = document.getElementById('gdPlayedCount');
+    const starterEl = document.getElementById('gdStarterCount');
+    const calledUpCount = existingGP.filter(r=>r.calledUp).length;
+    const starterCount = existingGP.filter(r=>r.calledUp && r.role==='Starter').length;
+    if (playedEl) playedEl.textContent = calledUpCount;
+    if (starterEl) starterEl.textContent = starterCount;
+  } catch(err) {
+    console.error('[refreshGameCounters] error:', err);
   }
 }
 
