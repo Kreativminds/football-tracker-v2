@@ -3,27 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Football Squad Tracker</title>
+<title>NextEleven</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 /* ── RESET & BASE ─────────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;font-family:Arial,sans-serif;font-size:14px;background:#f5f5f5;color:#111}
-button{font-family:Arial,sans-serif;cursor:pointer}
-input,select,textarea{font-family:Arial,sans-serif;font-size:13px}
+html,body{height:100%;font-family:'Montserrat',Arial,sans-serif;font-size:14px;background:#F2F4F7;color:#111}
+button{font-family:'Montserrat',Arial,sans-serif;cursor:pointer}
+input,select,textarea{font-family:'Montserrat',Arial,sans-serif;font-size:13px}
 a{color:#111;text-decoration:none}
 
 /* ── VARIABLES ────────────────────────────────────────────────────────────── */
 :root{
-  /* ZeroZero-inspired palette: maroon-red primary, navy nav */
-  --black:#a23b3b;
-  --black-dark:#7e2d2d;
-  --navy:#2d3e50;
+  /* NextEleven brand palette */
+  --black:#B23333;
+  --black-dark:#8f2828;
+  --navy:#0F1E2E;
   --dark:#333333;
-  --mid:#666666;
+  --mid:#6B7280;
   --muted:#999999;
   --border:#dddddd;
   --border-dark:#bbbbbb;
-  --bg:#f5f5f5;
+  --bg:#F2F4F7;
   --surface:#ffffff;
   --highlight:#f5e9e9;
   --radius:3px;
@@ -37,8 +40,12 @@ a{color:#111;text-decoration:none}
 
 /* ── NAV ──────────────────────────────────────────────────────────────────── */
 nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--navy);z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
-.nav-brand{color:#fff;font-size:15px;font-weight:700;letter-spacing:.3px;white-space:nowrap}
-.nav-brand span{color:#aaa;font-size:11px;font-weight:400;margin-left:8px}
+.nav-brand{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.nav-logo-mark{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,#0F1E2E,#1a2f45);border:1.5px solid #B23333;display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}
+.nav-logo-mark span{color:#fff;font-weight:800;font-size:12px;font-style:italic;line-height:1}
+.nav-wordmark{font-size:15px;font-weight:800;letter-spacing:.2px;color:#fff}
+.nav-wordmark b{color:#B23333}
+.nav-season{color:#9aa5b1;font-size:10px;font-weight:500;margin-left:6px;border-left:1px solid rgba(255,255,255,.2);padding-left:8px}
 .nav-links{display:flex;gap:2px;align-items:center}
 .nav-link{color:#ccc;font-size:12px;padding:6px 10px;border-radius:var(--radius);cursor:pointer;border:none;background:none;white-space:nowrap;transition:all .15s}
 .nav-link:hover{color:#fff;background:rgba(255,255,255,.1)}
@@ -322,6 +329,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 @media(max-width:480px){
   .stat-grid{grid-template-columns:repeat(2,1fr)}
   .stat-card .val{font-size:22px}
+  .nav-season{display:none}
 }
 
 /* ── FILE LABEL BUTTON ────────────────────────────────────────────────────── */
@@ -372,7 +380,11 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 
 <!-- NAV -->
 <nav>
-  <div class="nav-brand">⚽ <span id="navSeason">Squad Tracker</span></div>
+  <div class="nav-brand">
+    <div class="nav-logo-mark"><span>11</span></div>
+    <div class="nav-wordmark">Next<b>Eleven</b></div>
+    <span class="nav-season" id="navSeason">No season</span>
+  </div>
   <div class="nav-links" id="navLinks">
     <button class="nav-link active" data-section="home">&#127968; Home</button>
     <button class="nav-link" data-section="dashboard">&#128202; Dashboard</button>
@@ -529,7 +541,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <div class="page-header">
       <div>
         <h1>&#9881; Admin</h1>
-        <div class="page-header-sub">Super Admin — Football Squad Tracker</div>
+        <div class="page-header-sub">Super Admin — NextEleven</div>
       </div>
       <div class="btn-group">
         <button class="btn btn-primary" onclick="openRoadmapForm()">+ Add Item</button>
@@ -2614,7 +2626,7 @@ async function loadMeta() {
   applyNavLabels();
   const season = State.currentSeasonId ? await DB.get('seasons', State.currentSeasonId) : null;
   State.currentSeason = season || null;
-  document.getElementById('navSeason').textContent = season ? season.seasonName : 'Squad Tracker';
+  document.getElementById('navSeason').textContent = season ? season.seasonName : 'No season';
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2641,7 +2653,7 @@ const Render = (() => {
       el.innerHTML = `
         <div class="card" style="text-align:center;padding:32px">
           <div style="font-size:40px;margin-bottom:12px">&#9917;</div>
-          <h2 style="margin-bottom:8px">Welcome to Squad Tracker</h2>
+          <h2 style="margin-bottom:8px">Welcome to NextEleven</h2>
           <p style="color:var(--muted);margin-bottom:20px;font-size:13px">Create your first season to get started.</p>
           <div class="btn-group" style="justify-content:center">
             <button class="btn btn-primary" onclick="Nav.go('settings')">&#9881; Create Season</button>
@@ -2892,10 +2904,13 @@ const Render = (() => {
 
     const rows = players.map(p => {
       const injury = activeInjuryByPlayer[p.playerId];
+      const rowBg = injury ? '#fbeaea' : '';
+      const rowStyle = injury ? `style="background:${rowBg}"` : '';
+      const stickyBg = injury ? `style="background:${rowBg}"` : '';
       return `
-      <tr>
-        <td class="col-sticky-num">${p.shirtNumber||'—'}</td>
-        <td class="col-sticky-name" title="${esc(p.fullName)}" ${p.trackingStatus==='tracked'?`style="cursor:pointer;text-decoration:underline;text-decoration-color:#ccc" onclick="openPlayerCardPopup(${p.playerId})"`:''}>${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor" title="${esc(p.trackingLabel||'Tracked')}">${esc(p.trackingLabel||'★')}</span>`:''} ${!p.isActive?'<span class="badge-nc badge" style="font-size:9px">Archived</span>':''}</td>
+      <tr ${rowStyle} class="${injury?'row-injured':''}">
+        <td class="col-sticky-num" ${stickyBg}>${p.shirtNumber||'—'}</td>
+        <td class="col-sticky-name" title="${esc(p.fullName)}" style="${injury?`background:${rowBg};`:''}${p.trackingStatus==='tracked'?'cursor:pointer;text-decoration:underline;text-decoration-color:#ccc':''}" ${p.trackingStatus==='tracked'?`onclick="openPlayerCardPopup(${p.playerId})"`:''}>${esc(shortName(p.fullName))} ${p.trackingStatus==='tracked'?`<span class="badge badge-lor" title="${esc(p.trackingLabel||'Tracked')}">${esc(p.trackingLabel||'★')}</span>`:''} ${!p.isActive?'<span class="badge-nc badge" style="font-size:9px">Archived</span>':''}</td>
         <td><span class="pos-pill">${p.primaryPosition||'—'}</span></td>
         <td>${p.secondaryPosition||'—'}</td>
         <td>${p.dominantFoot||'—'}</td>
@@ -3255,7 +3270,7 @@ const Render = (() => {
 
     const topScorers = [...pStats].sort((a,b)=>b.goals-a.goals).slice(0,5);
     const topAssisters = [...pStats].sort((a,b)=>b.assists-a.assists).slice(0,5);
-    const mostApps = [...pStats].sort((a,b)=>b.calledUp-a.calledUp).slice(0,5);
+    const mostApps = [...pStats].filter(p=>p.calledUp>0).sort((a,b)=>b.calledUp-a.calledUp).slice(0,5);
     const mostMoM = [...pStats].sort((a,b)=>b.mom-a.mom).filter(p=>p.mom>0).slice(0,5);
 
     window._teamSummaryAllStats = pStats; // store full dataset for re-sort
@@ -3302,17 +3317,23 @@ const Render = (() => {
     });
 
     return `
-      <div class="card" id="${elId}">
-        <div class="card-title">${title}</div>
-        <table style="width:100%;border-collapse:collapse">
+      <div class="card" id="${elId}" style="padding:14px 0 14px 14px">
+        <div class="card-title" style="padding-right:14px">${title}</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:280px">
           <thead><tr>${headers.map((h,i)=>{
             const key = fields[i];
             const active = sortKey === key;
             const arrow = active ? (sortDir==='asc'?' ▲':' ▼') : '';
-            return `<th style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#999;padding:5px 8px;text-align:${i===0?'left':'center'};border-bottom:1px solid #ddd;cursor:pointer;user-select:none" onclick="playerTableSort('${tableId}','${key}')">${h}${arrow}</th>`;
+            const stickyStyle = i===0 ? 'position:sticky;left:0;background:#fff;z-index:1;' : '';
+            return `<th style="${stickyStyle}font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#999;padding:5px 8px;text-align:${i===0?'left':'center'};border-bottom:1px solid #ddd;white-space:nowrap;cursor:pointer;user-select:none" onclick="playerTableSort('${tableId}','${key}')">${h}${arrow}</th>`;
           }).join('')}</tr></thead>
-          <tbody>${sorted.map((p,i)=>`<tr>${fields.map((f,fi)=>`<td style="padding:7px 8px;font-size:12px;border-bottom:1px solid #eee;${fi===0?'font-weight:700':'text-align:center'}" ${fi===0?`title="${esc(p[f])}"`:''}>${fi===0?`${i+1}. ${esc(shortName(p[f]))}`:p[f]||0}</td>`).join('')}</tr>`).join('')}</tbody>
+          <tbody>${sorted.map((p,i)=>`<tr>${fields.map((f,fi)=>{
+            const stickyStyle = fi===0 ? 'position:sticky;left:0;background:#fff;z-index:1;' : '';
+            return `<td style="${stickyStyle}padding:7px 8px;font-size:12px;border-bottom:1px solid #eee;white-space:nowrap;${fi===0?'font-weight:700':'text-align:center'}" ${fi===0?`title="${esc(p[f])}"`:''}>${fi===0?`${i+1}. ${esc(shortName(p[f]))}`:p[f]||0}</td>`;
+          }).join('')}</tr>`).join('')}</tbody>
         </table>
+        </div>
       </div>`;
   }
 
@@ -3778,8 +3799,9 @@ const Render = (() => {
           <div style="font-size:13px;line-height:1.7;color:var(--dark)">${s.content}</div>
         </div>`).join('')}
 
-      <div class="card" style="background:#f8f8f8;margin-bottom:14px">
-        <div class="card-title">App Version</div>
+      <div class="card" style="background:#f8f8f8;margin-bottom:14px;text-align:center">
+        <div style="font-weight:800;font-size:15px;color:var(--navy)">Next<span style="color:var(--black)">Eleven</span></div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:1px;color:var(--mid);text-transform:uppercase;margin:4px 0 10px">Track. Develop. Improve.</div>
         <div style="font-size:12px;color:var(--muted)">
           Version ${CONFIG.APP_VERSION} &nbsp;·&nbsp; Schema v${CONFIG.SCHEMA_VERSION} &nbsp;·&nbsp;
           Built for offline-first use on Android Chrome and desktop browsers.
