@@ -2138,9 +2138,11 @@ async function renderExtendedStats(playerId) {
                         <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${f.label}</label>
                         <input type="number" min="0" max="99" value="${pgs?pgs[f.key]||0:0}"
                           id="ext-${playerId}-${g.gameId}-${f.key}"
+                          oninput="handleExtStatInput(${playerId},${g.gameId},'${f.key}',this.value)"
                           style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">
                       </div>`).join('')}
                   </div>
+                  ${section.section==='Shooting' ? `<div style="margin-top:6px;font-size:11px;color:var(--muted)">Shots Total (calculated): <strong id="ext-${playerId}-${g.gameId}-shotsTotal" style="color:var(--dark)">${(pgs?.shotsOnTarget||0)+(pgs?.shotsOffTarget||0)+(pgs?.shotsBlocked||0)}</strong></div>` : ''}
                 </div>`).join('')}
               <div class="form-actions">
                 <button class="btn btn-primary btn-sm" onclick="saveExtStats(${playerId},${g.gameId})">Save Stats</button>
@@ -2151,10 +2153,85 @@ async function renderExtendedStats(playerId) {
     </div>` : ''}`;
 }
 
+// ── EXTENDED STATS — LIVE AUTO-FILL LOGIC ────────────────────────────────────
+// Cross is a type of pass: logging a cross adds the same amount onto the pass
+// field, live, while typing. The pass field stays fully editable afterward —
+// this is a starting suggestion, not a locked value.
+// "Completed implies Attempted": if Won/Completed exceeds Attempted, bump
+// Attempted up to match, for Tackles, Duels, and Dribbles.
+// Shots Total is purely calculated (On Target + Off Target + Blocked) — no
+// input field, no override needed, just a live running sum.
+const EXT_STAT_CROSS_TO_PASS = { crossesAttempted: 'passesAttempted', crossesCompleted: 'passesCompleted' };
+const EXT_STAT_COMPLETED_IMPLIES_ATTEMPTED = {
+  tacklesWon: 'tacklesAttempted',
+  duelsWon: 'duelsAttempted',
+  dribblesCompleted: 'dribblesAttempted',
+};
+
+function getExtStatInputEl(playerId, gameId, key) {
+  return document.getElementById(`ext-${playerId}-${gameId}-${key}`);
+}
+
+let _prevExtStatValues = {}; // tracks last value per field key so we add only the delta, not the full new value each keystroke
+
+function handleExtStatInput(playerId, gameId, key, rawValue) {
+  const value = parseInt(rawValue) || 0;
+  const trackKey = `${playerId}-${gameId}-${key}`;
+  const prevValue = _prevExtStatValues[trackKey] || 0;
+  const delta = value - prevValue;
+  _prevExtStatValues[trackKey] = value;
+
+  // Rule 1: Cross -> Pass (add the delta, don't overwrite — respects manual pass edits)
+  if (EXT_STAT_CROSS_TO_PASS[key] && delta !== 0) {
+    const passKey = EXT_STAT_CROSS_TO_PASS[key];
+    const passEl = getExtStatInputEl(playerId, gameId, passKey);
+    if (passEl) {
+      const newPassVal = Math.max(0, (parseInt(passEl.value)||0) + delta);
+      passEl.value = newPassVal;
+      _prevExtStatValues[`${playerId}-${gameId}-${passKey}`] = newPassVal;
+    }
+  }
+
+  // Rule 2: Completed/Won implies Attempted — bump up if needed, never down
+  if (EXT_STAT_COMPLETED_IMPLIES_ATTEMPTED[key]) {
+    const attemptedKey = EXT_STAT_COMPLETED_IMPLIES_ATTEMPTED[key];
+    const attemptedEl = getExtStatInputEl(playerId, gameId, attemptedKey);
+    if (attemptedEl) {
+      const attemptedVal = parseInt(attemptedEl.value)||0;
+      if (value > attemptedVal) {
+        attemptedEl.value = value;
+        _prevExtStatValues[`${playerId}-${gameId}-${attemptedKey}`] = value;
+      }
+    }
+  }
+
+  // Shots Total — pure live sum, always recalculated, never stored as input
+  if (['shotsOnTarget','shotsOffTarget','shotsBlocked'].includes(key)) {
+    const onT = parseInt(getExtStatInputEl(playerId,gameId,'shotsOnTarget')?.value)||0;
+    const offT = parseInt(getExtStatInputEl(playerId,gameId,'shotsOffTarget')?.value)||0;
+    const blocked = parseInt(getExtStatInputEl(playerId,gameId,'shotsBlocked')?.value)||0;
+    const totalEl = document.getElementById(`ext-${playerId}-${gameId}-shotsTotal`);
+    if (totalEl) totalEl.textContent = onT + offT + blocked;
+  }
+}
+
 function toggleExtStatForm(playerId, gameId) {
   const el = document.getElementById(`ext-form-${playerId}-${gameId}`);
-  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+  if (!el) return;
+  const opening = el.style.display === 'none';
+  el.style.display = opening ? '' : 'none';
+  if (opening) {
+    // Seed delta-tracking with whatever values are already in the inputs,
+    // so the first edit after opening calculates a correct delta instead
+    // of treating the existing saved value as a jump from zero.
+    const allFields = EXT_STAT_FIELDS.flatMap(s => s.fields);
+    allFields.forEach(f => {
+      const input = getExtStatInputEl(playerId, gameId, f.key);
+      if (input) _prevExtStatValues[`${playerId}-${gameId}-${f.key}`] = parseInt(input.value)||0;
+    });
+  }
 }
+
 
 async function saveExtStats(playerId, gameId) {
   const allFields = EXT_STAT_FIELDS.flatMap(s => s.fields);
