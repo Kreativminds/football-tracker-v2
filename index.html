@@ -371,7 +371,8 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 .file-label-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:#fff;border:1px solid #bbb;border-radius:3px;font-size:13px;font-weight:700;color:var(--black);cursor:pointer;transition:background .15s}
 .file-label-btn:hover{background:#f0f0f0}
 /* ── IMPORT TABS ──────────────────────────────────────────────────────────── */
-.import-tab{padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;color:#999;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;border-top:none;border-left:none;border-right:none}
+.import-tab{padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;color:#999;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;border-top:none;border-left:none;border-right:none;white-space:nowrap;flex-shrink:0}
+.tab-bar-row{display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px;overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;align-items:stretch}
 .import-tab.active-tab{color:var(--black);border-bottom-color:var(--black)}
 /* ── IMPORT BADGE ─────────────────────────────────────────────────────────── */
 .badge-ok{background:#e6f4ea;color:#2a7a3b;padding:1px 6px;border-radius:2px;font-size:10px;font-weight:700;display:inline-block}
@@ -483,20 +484,20 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
         <div class="form-group"><label data-i18n="squad_lbl_nat">Nationality</label><input id="pf-nat" type="text" placeholder="e.g. Portuguese"></div>
         <div class="form-group"><label data-i18n="squad_lbl_pos1">Primary Position *</label>
           <select id="pf-pos1"><option value="" data-i18n="pos_select">Select...</option>
-            <option data-i18n="pos_gk">Goalkeeper</option><option data-i18n="pos_cb">Centre Back</option><option data-i18n="pos_rb">Right Back</option><option data-i18n="pos_lb">Left Back</option>
-            <option data-i18n="pos_dm">Defensive Midfielder</option><option data-i18n="pos_cm">Central Midfielder</option><option data-i18n="pos_am">Attacking Midfielder</option>
-            <option data-i18n="pos_rw">Right Winger</option><option data-i18n="pos_lw">Left Winger</option><option data-i18n="pos_st">Striker</option>
+            <option value="Goalkeeper" data-i18n="pos_gk">Goalkeeper</option><option value="Centre Back" data-i18n="pos_cb">Centre Back</option><option value="Right Back" data-i18n="pos_rb">Right Back</option><option value="Left Back" data-i18n="pos_lb">Left Back</option>
+            <option value="Defensive Midfielder" data-i18n="pos_dm">Defensive Midfielder</option><option value="Central Midfielder" data-i18n="pos_cm">Central Midfielder</option><option value="Attacking Midfielder" data-i18n="pos_am">Attacking Midfielder</option>
+            <option value="Right Winger" data-i18n="pos_rw">Right Winger</option><option value="Left Winger" data-i18n="pos_lw">Left Winger</option><option value="Striker" data-i18n="pos_st">Striker</option>
           </select>
         </div>
         <div class="form-group"><label data-i18n="squad_lbl_pos2">Secondary Position</label>
           <select id="pf-pos2"><option value="" data-i18n="pos_none">None</option>
-            <option data-i18n="pos_gk">Goalkeeper</option><option data-i18n="pos_cb">Centre Back</option><option data-i18n="pos_rb">Right Back</option><option data-i18n="pos_lb">Left Back</option>
-            <option data-i18n="pos_dm">Defensive Midfielder</option><option data-i18n="pos_cm">Central Midfielder</option><option data-i18n="pos_am">Attacking Midfielder</option>
-            <option data-i18n="pos_rw">Right Winger</option><option data-i18n="pos_lw">Left Winger</option><option data-i18n="pos_st">Striker</option>
+            <option value="Goalkeeper" data-i18n="pos_gk">Goalkeeper</option><option value="Centre Back" data-i18n="pos_cb">Centre Back</option><option value="Right Back" data-i18n="pos_rb">Right Back</option><option value="Left Back" data-i18n="pos_lb">Left Back</option>
+            <option value="Defensive Midfielder" data-i18n="pos_dm">Defensive Midfielder</option><option value="Central Midfielder" data-i18n="pos_cm">Central Midfielder</option><option value="Attacking Midfielder" data-i18n="pos_am">Attacking Midfielder</option>
+            <option value="Right Winger" data-i18n="pos_rw">Right Winger</option><option value="Left Winger" data-i18n="pos_lw">Left Winger</option><option value="Striker" data-i18n="pos_st">Striker</option>
           </select>
         </div>
         <div class="form-group"><label data-i18n="squad_lbl_foot">Dominant Foot</label>
-          <select id="pf-foot"><option data-i18n="foot_right">Right</option><option data-i18n="foot_left">Left</option><option data-i18n="foot_both">Both</option></select>
+          <select id="pf-foot"><option value="Right" data-i18n="foot_right">Right</option><option value="Left" data-i18n="foot_left">Left</option><option value="Both" data-i18n="foot_both">Both</option></select>
         </div>
         <div class="form-group"><label data-i18n="squad_lbl_height">Height (cm)</label><input id="pf-height" type="number" placeholder="e.g. 145"></div>
         <div class="form-group"><label data-i18n="squad_lbl_weight">Weight (kg)</label><input id="pf-weight" type="number" placeholder="e.g. 38"></div>
@@ -517,9 +518,9 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <input type="text" id="squadSearch" data-i18n-placeholder="squad_search_placeholder" placeholder="Search players...">
       <select id="squadFilter" style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
         <option value="" data-i18n="squad_all_positions">All positions</option>
-        <option data-i18n="pos_gk">Goalkeeper</option><option data-i18n="pos_cb">Centre Back</option><option data-i18n="pos_rb">Right Back</option><option data-i18n="pos_lb">Left Back</option>
-        <option data-i18n="pos_dm">Defensive Midfielder</option><option data-i18n="pos_cm">Central Midfielder</option><option data-i18n="pos_am">Attacking Midfielder</option>
-        <option data-i18n="pos_rw">Right Winger</option><option data-i18n="pos_lw">Left Winger</option><option data-i18n="pos_st">Striker</option>
+        <option value="Goalkeeper" data-i18n="pos_gk">Goalkeeper</option><option value="Centre Back" data-i18n="pos_cb">Centre Back</option><option value="Right Back" data-i18n="pos_rb">Right Back</option><option value="Left Back" data-i18n="pos_lb">Left Back</option>
+        <option value="Defensive Midfielder" data-i18n="pos_dm">Defensive Midfielder</option><option value="Central Midfielder" data-i18n="pos_cm">Central Midfielder</option><option value="Attacking Midfielder" data-i18n="pos_am">Attacking Midfielder</option>
+        <option value="Right Winger" data-i18n="pos_rw">Right Winger</option><option value="Left Winger" data-i18n="pos_lw">Left Winger</option><option value="Striker" data-i18n="pos_st">Striker</option>
       </select>
     </div>
     <div id="squadContent"></div>
@@ -549,7 +550,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
             </div>
           </div>
           <div class="form-group"><label data-i18n="games_lbl_comptype">Competition Type</label>
-            <select id="gf-compType"><option data-i18n="comp_league">League</option><option data-i18n="comp_cup">Cup</option><option data-i18n="comp_friendly">Friendly</option><option data-i18n="comp_tournament">Tournament</option><option data-i18n="comp_trial">Trial</option></select>
+            <select id="gf-compType"><option value="League" data-i18n="comp_league">League</option><option value="Cup" data-i18n="comp_cup">Cup</option><option value="Friendly" data-i18n="comp_friendly">Friendly</option><option value="Tournament" data-i18n="comp_tournament">Tournament</option><option value="Trial" data-i18n="comp_trial">Trial</option></select>
           </div>
           <div class="form-group"><label data-i18n="games_lbl_compname">Competition Name</label><input id="gf-compName" type="text" placeholder="e.g. Liga Revelação"></div>
           <div class="form-group"><label data-i18n="games_lbl_ground">Venue / Ground</label><input id="gf-ground" type="text" placeholder="e.g. Estádio Municipal"></div>
@@ -565,7 +566,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
         <input type="text" id="gamesSearch" data-i18n-placeholder="games_search_placeholder" placeholder="Search games...">
         <select id="gamesFilter" style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
           <option value="" data-i18n="games_all_competitions">All competitions</option>
-          <option data-i18n="comp_league">League</option><option data-i18n="comp_cup">Cup</option><option data-i18n="comp_friendly">Friendly</option><option data-i18n="comp_tournament">Tournament</option><option data-i18n="comp_trial">Trial</option>
+          <option value="League" data-i18n="comp_league">League</option><option value="Cup" data-i18n="comp_cup">Cup</option><option value="Friendly" data-i18n="comp_friendly">Friendly</option><option value="Tournament" data-i18n="comp_tournament">Tournament</option><option value="Trial" data-i18n="comp_trial">Trial</option>
         </select>
       </div>
       <div id="gamesContent"></div>
@@ -588,7 +589,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       </div>
     </div>
     <!-- Admin sub-tabs -->
-    <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px;overflow-x:auto">
+    <div class="tab-bar-row">
       <button class="import-tab active-tab" id="atab-roadmap" onclick="switchAdminTab('roadmap')">&#128202; <span data-i18n="adm_tab_roadmap">Roadmap</span></button>
       <button class="import-tab" id="atab-kanban" onclick="switchAdminTab('kanban')">&#9646;&#9646; <span data-i18n="adm_tab_kanban">Kanban</span></button>
       <button class="import-tab" id="atab-fields" onclick="switchAdminTab('fields')">&#128065; <span data-i18n="adm_tab_fields">Field Visibility</span></button>
@@ -718,8 +719,8 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <div class="form-group"><label data-i18n="rmf_lbl_test_status">Test Status</label>
         <select id="rm-testStatus">
           <option value="" data-i18n="rmf_not_tested">Not tested</option>
-          <option data-i18n="rmf_pending">Pending</option><option value="In Progress" data-i18n="rm_status_inprogress">In Progress</option>
-          <option data-i18n="rmf_passed">Passed</option><option data-i18n="rmf_failed">Failed</option>
+          <option value="Pending" data-i18n="rmf_pending">Pending</option><option value="In Progress" data-i18n="rm_status_inprogress">In Progress</option>
+          <option value="Passed" data-i18n="rmf_passed">Passed</option><option value="Failed" data-i18n="rmf_failed">Failed</option>
         </select>
       </div>
       <div class="form-group"><label data-i18n="rmf_lbl_visible">Visible to Users?</label>
@@ -796,6 +797,23 @@ function isGameResultVisible(game) {
   }
   const cutoff = new Date(gameDateTime.getTime() + (CONFIG.MATCH_DURATION_MINS + CONFIG.RESULT_VISIBILITY_BUFFER_MINS) * 60000);
   return now >= cutoff;
+}
+
+// Stored values for competitionType and homeAway are always saved in English
+// (League/Cup/Friendly/Tournament/Trial, Home/Away/Neutral) regardless of the
+// active display language — only the on-screen label gets translated. This
+// keeps the data model language-independent while every place it's shown
+// goes through this mapping instead of displaying the raw stored string.
+function compTypeLabel(value) {
+  const map = {
+    'League': 'comp_league', 'Cup': 'comp_cup', 'Friendly': 'comp_friendly',
+    'Tournament': 'comp_tournament', 'Trial': 'comp_trial',
+  };
+  return map[value] ? I18n.t(map[value]) : (value || '');
+}
+function homeAwayLabel(value) {
+  const map = { 'Home': 'venue_home', 'Away': 'venue_away', 'Neutral': 'venue_neutral' };
+  return map[value] ? I18n.t(map[value]) : (value || '');
 }
 
 // ── MOST USED LINEUP ─────────────────────────────────────────────────────────
@@ -1502,6 +1520,21 @@ const TR = {
     bk_confirm_delete_title:'Delete Backup',
     bk_confirm_delete_body:'Delete this backup? This cannot be undone.',
     dbg_panel_waiting:'DEBUG MODE ON — waiting for first action...',
+
+    // ── TEAM SUMMARY ──
+    ts_no_games_title:'No games yet',
+    ts_no_games_desc:'Add games to see team statistics.',
+    ts_played:'Played', ts_wins:'Wins', ts_draws:'Draws', ts_losses:'Losses',
+    ts_goals_for:'Goals For', ts_goals_against:'Goals Against', ts_goal_diff:'Goal Diff', ts_clean_sheets:'Clean Sheets',
+    ts_records:'Records',
+    ts_home:'Home', ts_away:'Away',
+    ts_best_win_streak:'Best Win Streak', ts_best_unbeaten:'Best Unbeaten Run',
+    ts_games_suffix:'games',
+    ts_biggest_win:'Biggest Win', ts_biggest_loss:'Biggest Loss',
+    ts_vs:'vs',
+    ts_top_scorers:'Top Scorers', ts_top_assisters:'Top Assisters',
+    ts_most_used:'Most Used', ts_player_of_match:'Player of the Match',
+    ts_stat_goals:'GOALS', ts_stat_assists:'ASSISTS', ts_stat_apps:'APPS', ts_stat_mom:'MOM',
   },
   PT:{
     nav_import:'Importar', nav_dashboard:'Início', nav_squad:'Plantel', nav_games:'Jogos', nav_lorenzo:'Lorenzo', nav_team:'Resumo Equipa', nav_achievements:'Conquistas', nav_history:'Historial', nav_settings:'Definições', settings_language:'Idioma', lbl_language:'Idioma',
@@ -2118,6 +2151,21 @@ const TR = {
     bk_confirm_delete_title:'Eliminar Cópia de Segurança',
     bk_confirm_delete_body:'Eliminar esta cópia de segurança? Esta ação não pode ser desfeita.',
     dbg_panel_waiting:'MODO DE DEPURAÇÃO ATIVO — a aguardar a primeira ação...',
+
+    // ── TEAM SUMMARY ──
+    ts_no_games_title:'Ainda sem jogos',
+    ts_no_games_desc:'Adicione jogos para ver as estatísticas da equipa.',
+    ts_played:'Jogos', ts_wins:'Vitórias', ts_draws:'Empates', ts_losses:'Derrotas',
+    ts_goals_for:'Golos Marcados', ts_goals_against:'Golos Sofridos', ts_goal_diff:'Diferença de Golos', ts_clean_sheets:'Jogos sem Sofrer Golos',
+    ts_records:'Registos',
+    ts_home:'Casa', ts_away:'Fora',
+    ts_best_win_streak:'Melhor Sequência de Vitórias', ts_best_unbeaten:'Melhor Série Invicta',
+    ts_games_suffix:'jogos',
+    ts_biggest_win:'Maior Vitória', ts_biggest_loss:'Maior Derrota',
+    ts_vs:'vs',
+    ts_top_scorers:'Melhores Marcadores', ts_top_assisters:'Melhores Assistentes',
+    ts_most_used:'Mais Utilizados', ts_player_of_match:'Melhor em Campo',
+    ts_stat_goals:'GOLOS', ts_stat_assists:'ASSISTÊNCIAS', ts_stat_apps:'JOGOS', ts_stat_mom:'MVP',
   },
   IT:{
     nav_import:'Importa', nav_dashboard:'Dashboard', nav_squad:'Rosa', nav_games:'Partite', nav_lorenzo:'Lorenzo', nav_team:'Squadra', nav_achievements:'Traguardi', nav_history:'Storia', nav_settings:'Impostazioni', settings_language:'Lingua', lbl_language:'Lingua',
@@ -3106,7 +3154,7 @@ async function buildTrackedNav() {
         </div>
       </div>
       <!-- Sub-tabs -->
-      <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px;overflow-x:auto">
+      <div class="tab-bar-row">
         <button class="import-tab active-tab" id="tab-overview-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'overview')">${I18n.t('tptab_overview')}</button>
         <button class="import-tab" id="tab-stats-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'stats')">${I18n.t('tptab_stats')}</button>
         <button class="import-tab" id="tab-log-${p.playerId}" onclick="switchTrackedTab(${p.playerId},'log')">${I18n.t('tptab_log')}</button>
@@ -3357,7 +3405,7 @@ async function renderExtendedStats(playerId) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:${hasData?'#f0faf2':'#f8f8f8'};cursor:pointer" onclick="toggleExtStatForm(${playerId},${g.gameId})">
               <div>
                 <span style="font-weight:700;font-size:12px">${g.date?fmtDate(g.date):'—'} vs ${esc(g.opponent)}</span>
-                <span style="font-size:11px;color:var(--muted);margin-left:8px">${g.homeAway||''}</span>
+                <span style="font-size:11px;color:var(--muted);margin-left:8px">${homeAwayLabel(g.homeAway)}</span>
               </div>
               <div style="display:flex;gap:8px;align-items:center">
                 ${hasData ? `<span style="font-size:10px;color:#2a7a3b;font-weight:700">✓ ${I18n.t('ext_stats_entered')}</span>` : `<span style="font-size:10px;color:var(--muted)">${I18n.t('ext_no_stats_yet')}</span>`}
@@ -4176,7 +4224,7 @@ const Render = (() => {
         <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
           <div>
             <div style="font-size:18px;font-weight:700">${esc(nextGame.opponent)}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px">${nextGame.homeAway||''} ${nextGame.venue?'· '+esc(nextGame.venue):''}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${homeAwayLabel(nextGame.homeAway)} ${nextGame.venue?'· '+esc(nextGame.venue):''}</div>
             <div style="font-size:13px;margin-top:8px">${fmtDate(nextGame.date)}${nextGame.gameTime?' · Kick-off '+nextGame.gameTime:''}</div>
           </div>
           ${nextGame.arrivalTime?`
@@ -4208,8 +4256,8 @@ const Render = (() => {
           return `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="goToGameDetail(${g.gameId})">
             <div>
-              <div style="font-weight:700;font-size:13px">${esc(g.opponent)} <span style="font-weight:400;color:var(--muted);font-size:11px">${g.homeAway||''}</span></div>
-              <div style="font-size:10px;color:var(--muted);margin-top:1px">${fmtDate(g.date)}${g.competitionType?' · '+g.competitionType:''}</div>
+              <div style="font-weight:700;font-size:13px">${esc(g.opponent)} <span style="font-weight:400;color:var(--muted);font-size:11px">${homeAwayLabel(g.homeAway)}</span></div>
+              <div style="font-size:10px;color:var(--muted);margin-top:1px">${fmtDate(g.date)}${g.competitionType?' · '+compTypeLabel(g.competitionType):''}</div>
             </div>
             <div style="text-align:right;flex-shrink:0">
               ${gVisible ? `
@@ -4490,8 +4538,8 @@ const Render = (() => {
       return `<tr style="cursor:pointer" onclick="openGameDetail(${g.gameId})">
         <td class="col-sticky-num" style="min-width:60px">${g.date?fmtDate(g.date):'—'}</td>
         <td class="col-sticky-name">${esc(g.opponent)}</td>
-        <td>${g.homeAway||'—'}</td>
-        <td><span style="font-size:11px;color:var(--muted)">${g.competitionType||'—'}</span></td>
+        <td>${g.homeAway?homeAwayLabel(g.homeAway):'—'}</td>
+        <td><span style="font-size:11px;color:var(--muted)">${g.competitionType?compTypeLabel(g.competitionType):'—'}</span></td>
         <td class="td-bold">${gVisible?(()=>{const s=Calc.homeAwayScore(g.homeAway,g._our,g._their);return s.home+' — '+s.away;})():'<span class="td-muted" style="font-weight:400;font-size:11px">—</span>'}</td>
         <td>${gVisible?`<span class="badge badge-${g._res}">${g._res}</span>`:`<span class="td-muted" style="font-size:11px">${I18n.t('games_status_upcoming')}</span>`}</td>
         <td onclick="event.stopPropagation()">
@@ -4546,7 +4594,7 @@ const Render = (() => {
         <div class="game-header-top">
           <div>
             <div class="game-title">${esc(game.opponent)}</div>
-            <div class="game-meta">${game.date?fmtDate(game.date):'—'} · ${game.homeAway||''} · ${game.competitionType||''} ${game.competitionName?'· '+esc(game.competitionName):''} ${game.venue?'· '+esc(game.venue):''}</div>
+            <div class="game-meta">${game.date?fmtDate(game.date):'—'} · ${homeAwayLabel(game.homeAway)} · ${compTypeLabel(game.competitionType)} ${game.competitionName?'· '+esc(game.competitionName):''} ${game.venue?'· '+esc(game.venue):''}</div>
           </div>
           <div>
             <div class="game-score" id="liveScore">${displayScore.home} — ${displayScore.away}</div>
@@ -4556,7 +4604,7 @@ const Render = (() => {
         ${game.teamNotes?`<div style="margin-top:10px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);padding-top:10px">${esc(game.teamNotes)}</div>`:''}
       </div>
 
-      <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:16px;overflow-x:auto">
+      <div class="tab-bar-row" style="margin-bottom:16px">
         <button class="import-tab ${currentTab==='squad'?'active-tab':''}" id="gdtab-squad" onclick="switchSimpleTab(${gameId},'squad')">${I18n.t('gd_tab_squad')}</button>
         <button class="import-tab ${currentTab==='xi'?'active-tab':''}" id="gdtab-xi" onclick="switchSimpleTab(${gameId},'xi')">${I18n.t('gd_tab_xi')}</button>
         <button class="import-tab ${currentTab==='goals'?'active-tab':''}" id="gdtab-goals" onclick="switchSimpleTab(${gameId},'goals')">${I18n.t('gd_tab_goals')}</button>
@@ -4764,7 +4812,7 @@ const Render = (() => {
     ]);
 
     if (!games.length) {
-      el.innerHTML = `<div class="empty"><strong>No games yet</strong><p>Add games to see team statistics.</p></div>`;
+      el.innerHTML = `<div class="empty"><strong>${I18n.t('ts_no_games_title')}</strong><p>${I18n.t('ts_no_games_desc')}</p></div>`;
       return;
     }
 
@@ -4792,35 +4840,35 @@ const Render = (() => {
 
     el.innerHTML = `
       <div class="stat-grid">
-        <div class="stat-card"><div class="val">${ts.played}</div><div class="lbl">Played</div></div>
-        <div class="stat-card"><div class="val">${ts.wins}</div><div class="lbl">Wins</div></div>
-        <div class="stat-card"><div class="val">${ts.draws}</div><div class="lbl">Draws</div></div>
-        <div class="stat-card"><div class="val">${ts.losses}</div><div class="lbl">Losses</div></div>
-        <div class="stat-card"><div class="val">${ts.goalsFor}</div><div class="lbl">Goals For</div></div>
-        <div class="stat-card"><div class="val">${ts.goalsAgainst}</div><div class="lbl">Goals Against</div></div>
-        <div class="stat-card"><div class="val">${ts.goalDiff>0?'+':''}${ts.goalDiff}</div><div class="lbl">Goal Diff</div></div>
-        <div class="stat-card"><div class="val">${ts.cleanSheets}</div><div class="lbl">Clean Sheets</div></div>
+        <div class="stat-card"><div class="val">${ts.played}</div><div class="lbl">${I18n.t('ts_played')}</div></div>
+        <div class="stat-card"><div class="val">${ts.wins}</div><div class="lbl">${I18n.t('ts_wins')}</div></div>
+        <div class="stat-card"><div class="val">${ts.draws}</div><div class="lbl">${I18n.t('ts_draws')}</div></div>
+        <div class="stat-card"><div class="val">${ts.losses}</div><div class="lbl">${I18n.t('ts_losses')}</div></div>
+        <div class="stat-card"><div class="val">${ts.goalsFor}</div><div class="lbl">${I18n.t('ts_goals_for')}</div></div>
+        <div class="stat-card"><div class="val">${ts.goalsAgainst}</div><div class="lbl">${I18n.t('ts_goals_against')}</div></div>
+        <div class="stat-card"><div class="val">${ts.goalDiff>0?'+':''}${ts.goalDiff}</div><div class="lbl">${I18n.t('ts_goal_diff')}</div></div>
+        <div class="stat-card"><div class="val">${ts.cleanSheets}</div><div class="lbl">${I18n.t('ts_clean_sheets')}</div></div>
       </div>
 
       ${renderLineupPitch(mostUsedLineup, shirtColor)}
 
       <div class="card">
-        <div class="card-title">Records</div>
-        <div class="info-row"><span class="ir-label">Home</span><span class="ir-value">${ts.homeW}W ${ts.homeD}D ${ts.homeL}L</span></div>
-        <div class="info-row"><span class="ir-label">Away</span><span class="ir-value">${ts.awayW}W ${ts.awayD}D ${ts.awayL}L</span></div>
-        <div class="info-row"><span class="ir-label">Best Win Streak</span><span class="ir-value">${ts.bestStreak} games</span></div>
-        <div class="info-row"><span class="ir-label">Best Unbeaten Run</span><span class="ir-value">${ts.bestUnbeaten} games</span></div>
-        ${ts.biggestWin?`<div class="info-row"><span class="ir-label">Biggest Win</span><span class="ir-value">${ts.biggestWin.score} vs ${esc(ts.biggestWin.opp)}</span></div>`:''}
-        ${ts.biggestLoss?`<div class="info-row"><span class="ir-label">Biggest Loss</span><span class="ir-value">${ts.biggestLoss.score} vs ${esc(ts.biggestLoss.opp)}</span></div>`:''}
+        <div class="card-title">${I18n.t('ts_records')}</div>
+        <div class="info-row"><span class="ir-label">${I18n.t('ts_home')}</span><span class="ir-value">${ts.homeW}W ${ts.homeD}D ${ts.homeL}L</span></div>
+        <div class="info-row"><span class="ir-label">${I18n.t('ts_away')}</span><span class="ir-value">${ts.awayW}W ${ts.awayD}D ${ts.awayL}L</span></div>
+        <div class="info-row"><span class="ir-label">${I18n.t('ts_best_win_streak')}</span><span class="ir-value">${ts.bestStreak} ${I18n.t('ts_games_suffix')}</span></div>
+        <div class="info-row"><span class="ir-label">${I18n.t('ts_best_unbeaten')}</span><span class="ir-value">${ts.bestUnbeaten} ${I18n.t('ts_games_suffix')}</span></div>
+        ${ts.biggestWin?`<div class="info-row"><span class="ir-label">${I18n.t('ts_biggest_win')}</span><span class="ir-value">${ts.biggestWin.score} ${I18n.t('ts_vs')} ${esc(ts.biggestWin.opp)}</span></div>`:''}
+        ${ts.biggestLoss?`<div class="info-row"><span class="ir-label">${I18n.t('ts_biggest_loss')}</span><span class="ir-value">${ts.biggestLoss.score} ${I18n.t('ts_vs')} ${esc(ts.biggestLoss.opp)}</span></div>`:''}
       </div>
 
       <div class="leader-grid">
-        ${leaderCard('Top Scorers', topScorers, 'goals', 'GOALS')}
-        ${leaderCard('Top Assisters', topAssisters, 'assists', 'ASSISTS')}
+        ${leaderCard(I18n.t('ts_top_scorers'), topScorers, 'goals', I18n.t('ts_stat_goals'))}
+        ${leaderCard(I18n.t('ts_top_assisters'), topAssisters, 'assists', I18n.t('ts_stat_assists'))}
       </div>
       <div class="leader-grid">
-        ${leaderCard('Most Used', mostApps, 'calledUp', 'APPS')}
-        ${mostMoM.length ? leaderCard('Player of the Match', mostMoM, 'mom', 'MOM') : '<div></div>'}
+        ${leaderCard(I18n.t('ts_most_used'), mostApps, 'calledUp', I18n.t('ts_stat_apps'))}
+        ${mostMoM.length ? leaderCard(I18n.t('ts_player_of_match'), mostMoM, 'mom', I18n.t('ts_stat_mom')) : '<div></div>'}
       </div>
     `;
   }
@@ -4974,7 +5022,7 @@ const Render = (() => {
 
     el.innerHTML = `
       <!-- Settings Tabs -->
-      <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px;overflow-x:auto">
+      <div class="tab-bar-row">
         <button class="import-tab active-tab" id="stab-seasons" onclick="switchSettingsTab('seasons')">${I18n.t('set_tab_seasons')}</button>
         <button class="import-tab" id="stab-import" onclick="switchSettingsTab('import')">${I18n.t('set_tab_import')}</button>
         <button class="import-tab" id="stab-sync" onclick="switchSettingsTab('sync')">${I18n.t('set_tab_sync')}</button>
@@ -5055,7 +5103,7 @@ const Render = (() => {
           <div class="page-header-sub" id="importSubtitle" style="margin-bottom:14px"></div>
 
           <!-- TAB BUTTONS -->
-          <div style="display:flex;gap:0;border-bottom:2px solid #ddd;margin-bottom:20px">
+          <div class="tab-bar-row">
             <button id="tabPlayers" class="import-tab active-tab" onclick="switchImportTab('players')">${I18n.t('set_tab_players')}</button>
             <button id="tabGames" class="import-tab" onclick="switchImportTab('games')">${I18n.t('set_tab_games_import')}</button>
             <button id="tabOpponents" class="import-tab" onclick="switchImportTab('opponents')">${I18n.t('set_tab_opponents')}</button>
@@ -7282,8 +7330,8 @@ function renderImportPreview(validated, containerId, type) {
         <td>${r.rowNum}</td>
         <td>${r.data.date || '—'}</td>
         <td style="font-weight:700">${r.data.opponent}</td>
-        <td>${r.data.homeAway}</td>
-        <td>${r.data.competitionType}</td>
+        <td>${r.data.homeAway?homeAwayLabel(r.data.homeAway):'—'}</td>
+        <td>${r.data.competitionType?compTypeLabel(r.data.competitionType):'—'}</td>
         <td>${badge}</td></tr>`;
     }
   }).join('');
