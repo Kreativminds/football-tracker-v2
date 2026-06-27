@@ -431,6 +431,35 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
   </div>
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PLAYER PORTAL — a deliberately separate, minimal shell. Built as its own
+     container (not a mode inside #app) so there is no shared navigation, no
+     shared buttons, and no risk of an edit/delete/admin control from the
+     guardian app ever leaking into the player's view by accident. Every
+     write action available here is built fresh, specifically for the player,
+     and only Training has any write capability at all (see Pass 1/2 rules).
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="playerPortal" style="display:none;min-height:100vh;flex-direction:column;background:var(--bg)">
+  <nav style="position:static">
+    <div class="nav-brand">
+      <div class="nav-logo-mark"><span>11</span></div>
+      <div class="nav-wordmark">Next<b>Eleven</b></div>
+      <span class="nav-season" id="playerPortalName"></span>
+    </div>
+    <div class="nav-links">
+      <button class="nav-link active" data-portal-section="home" onclick="Nav.goPortal('home')">&#127968; <span data-i18n="pp_nav_home">Home</span></button>
+      <button class="nav-link" data-portal-section="training" onclick="Nav.goPortal('training')">&#9917; <span data-i18n="pp_nav_training">Training</span></button>
+      <button class="nav-link" data-portal-section="stats" onclick="Nav.goPortal('stats')">&#128202; <span data-i18n="pp_nav_stats">My Stats</span></button>
+    </div>
+    <button class="nav-account-btn" onclick="handlePlayerPortalExit()" title="">&#128274;</button>
+  </nav>
+  <div class="main-content">
+    <div class="section active" id="pp-sec-home"></div>
+    <div class="section" id="pp-sec-training" style="display:none"></div>
+    <div class="section" id="pp-sec-stats" style="display:none"></div>
+  </div>
+</div>
+
 <div id="app" style="display:none">
 
 <!-- NAV -->
@@ -891,22 +920,83 @@ function renderAuthGate() {
   const el = document.getElementById('authGateCard');
   if (!el) return;
   el.innerHTML = `
-    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:center">${I18n.t('acc_gate_intro')}</p>
-    <div class="tab-bar-row" style="margin-bottom:14px">
-      <button class="import-tab active-tab" id="acc-tab-login" onclick="switchAccountFormTab('login')">${I18n.t('acc_tab_login')}</button>
-      <button class="import-tab" id="acc-tab-signup" onclick="switchAccountFormTab('signup')">${I18n.t('acc_tab_signup')}</button>
+    <div class="tab-bar-row" style="margin-bottom:16px">
+      <button class="import-tab active-tab" id="role-tab-guardian" onclick="switchAuthRoleTab('guardian')">${I18n.t('acc_role_guardian')}</button>
+      <button class="import-tab" id="role-tab-player" onclick="switchAuthRoleTab('player')">${I18n.t('acc_role_player')}</button>
     </div>
-    <div class="form-grid" style="margin-bottom:12px">
-      <div class="form-group full"><label>${I18n.t('acc_lbl_email')}</label><input id="acc-email" type="email" placeholder="you@example.com" autocomplete="email"></div>
-      <div class="form-group full"><label>${I18n.t('acc_lbl_password')}</label><input id="acc-password" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+
+    <!-- GUARDIAN ROLE — existing email/password login, future Google/Facebook -->
+    <div id="authRolePanel-guardian">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:center">${I18n.t('acc_gate_intro')}</p>
+      <div class="tab-bar-row" style="margin-bottom:14px">
+        <button class="import-tab active-tab" id="acc-tab-login" onclick="switchAccountFormTab('login')">${I18n.t('acc_tab_login')}</button>
+        <button class="import-tab" id="acc-tab-signup" onclick="switchAccountFormTab('signup')">${I18n.t('acc_tab_signup')}</button>
+      </div>
+      <div class="form-grid" style="margin-bottom:12px">
+        <div class="form-group full"><label>${I18n.t('acc_lbl_email')}</label><input id="acc-email" type="email" placeholder="you@example.com" autocomplete="email"></div>
+        <div class="form-group full"><label>${I18n.t('acc_lbl_password')}</label><input id="acc-password" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+      </div>
+      <div id="acc-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
+      <button class="btn btn-primary" id="acc-submit-btn" style="width:100%" onclick="handleAccountSubmit()">${I18n.t('acc_btn_login')}</button>
+      <p style="font-size:11px;color:var(--muted);margin-top:14px;text-align:center">${I18n.t('acc_gate_offline_note')}</p>
+      <div style="text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <a href="#" onclick="event.preventDefault();handleEmergencyBypass()" style="font-size:12px;color:var(--muted);text-decoration:underline">${I18n.t('acc_emergency_bypass')}</a>
+      </div>
     </div>
-    <div id="acc-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
-    <button class="btn btn-primary" id="acc-submit-btn" style="width:100%" onclick="handleAccountSubmit()">${I18n.t('acc_btn_login')}</button>
-    <p style="font-size:11px;color:var(--muted);margin-top:14px;text-align:center">${I18n.t('acc_gate_offline_note')}</p>
-    <div style="text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
-      <a href="#" onclick="event.preventDefault();handleEmergencyBypass()" style="font-size:12px;color:var(--muted);text-decoration:underline">${I18n.t('acc_emergency_bypass')}</a>
+
+    <!-- PLAYER ROLE — PIN for now, future Google/Facebook -->
+    <div id="authRolePanel-player" style="display:none">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:center">${I18n.t('acc_player_gate_intro')}</p>
+      <div class="form-grid" style="margin-bottom:12px">
+        <div class="form-group full"><label>${I18n.t('acc_lbl_pin')}</label><input id="player-pin" type="text" inputmode="numeric" maxlength="8" placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:4px" autocomplete="off"></div>
+      </div>
+      <div id="player-pin-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="handlePlayerPinSubmit()">${I18n.t('acc_btn_player_login')}</button>
+      <p style="font-size:11px;color:var(--muted);margin-top:14px;text-align:center">${I18n.t('acc_player_pin_note')}</p>
     </div>
   `;
+}
+
+function switchAuthRoleTab(role) {
+  document.getElementById('role-tab-guardian')?.classList.toggle('active-tab', role==='guardian');
+  document.getElementById('role-tab-player')?.classList.toggle('active-tab', role==='player');
+  document.getElementById('authRolePanel-guardian').style.display = role==='guardian' ? '' : 'none';
+  document.getElementById('authRolePanel-player').style.display = role==='player' ? '' : 'none';
+}
+
+// ── PLAYER PIN LOGIN ──────────────────────────────────────────────────────────
+// Checks the entered PIN against every tracked player's stored viewerPin
+// (set by the guardian from Admin — see Pass 4 PIN management). A match
+// drops the player straight into their own read-only portal. This works
+// fully offline, since the PIN is just a value already stored locally —
+// no Supabase call needed at all, matching the "player logs in with PIN"
+// requirement without depending on connectivity.
+async function handlePlayerPinSubmit() {
+  const pinInput = document.getElementById('player-pin');
+  const errEl = document.getElementById('player-pin-error');
+  if (errEl) errEl.style.display = 'none';
+  const enteredPin = pinInput?.value.trim();
+  if (!enteredPin) {
+    if (errEl) { errEl.textContent = I18n.t('acc_err_pin_required'); errEl.style.display = ''; }
+    return;
+  }
+
+  const allPlayers = await DB.getAll('players');
+  const match = allPlayers.find(p => p.viewerPin && p.viewerPin === enteredPin);
+  if (!match) {
+    if (errEl) { errEl.textContent = I18n.t('acc_err_pin_invalid'); errEl.style.display = ''; }
+    return;
+  }
+
+  State.portalPlayerId = match.playerId;
+  document.getElementById('authGate').style.display = 'none';
+  document.getElementById('playerPortal').style.display = 'flex';
+  document.getElementById('playerPortalName').textContent = shortName(match.fullName);
+  // Make sure the season/meta context is loaded the same way the guardian
+  // app loads it, since the portal reuses the same season-scoped data.
+  await loadMeta();
+  await Nav.goPortal('home');
+  Toast.show(I18n.t('acc_player_login_success', {name: shortName(match.fullName)}));
 }
 
 // ── EMERGENCY OFFLINE BYPASS ──────────────────────────────────────────────────
@@ -1079,6 +1169,14 @@ async function handleLogout() {
   // Hide the app immediately and show the gate again — logging out means
   // no data should remain visible on screen.
   document.getElementById('app').style.display = 'none';
+  renderAuthGate();
+  document.getElementById('authGate').style.display = 'flex';
+}
+
+function handlePlayerPortalExit() {
+  if (!window.confirm(I18n.t('pp_exit_confirm'))) return;
+  document.getElementById('playerPortal').style.display = 'none';
+  State.portalPlayerId = null;
   renderAuthGate();
   document.getElementById('authGate').style.display = 'flex';
 }
@@ -1859,6 +1957,36 @@ const TR = {
     tr_progress_title:'Progress This Season',
     tr_progress_sessions_suffix:'sessions',
     tr_progress_empty:'Complete a session to start tracking progress.',
+
+    // ── PLAYER PORTAL ──
+    pp_nav_home:'Home', pp_nav_training:'Training', pp_nav_stats:'My Stats',
+    pp_home_title:'My Home',
+    pp_next_training:'Next Training',
+    pp_view_training:'View Training',
+    pp_no_training_scheduled:'No training session scheduled.',
+    pp_create_training:'+ Create a Training Session',
+    pp_stats_title:'My Stats',
+    pp_player_not_found:'Player not found.',
+    pp_exit_confirm:'Exit your training portal? You will need the link and PIN again to come back in.',
+
+    // ── AUTH GATE — ROLE TABS & PLAYER PIN ──
+    acc_role_guardian:'Guardian', acc_role_player:'Player',
+    acc_player_gate_intro:'Enter the PIN your guardian gave you to see your stats and training.',
+    acc_lbl_pin:'PIN',
+    acc_btn_player_login:'Enter',
+    acc_player_pin_note:'Ask your guardian if you don\'t have a PIN yet.',
+    acc_err_pin_required:'Enter your PIN.',
+    acc_err_pin_invalid:'That PIN doesn\'t match any player. Check with your guardian.',
+    acc_player_login_success:'Welcome, {name}!',
+
+    // ── PORTAL PIN MANAGEMENT (Admin/Squad side) ──
+    acc_btn_set_pin:'Set PIN', acc_btn_manage_pin:'Manage PIN',
+    acc_pin_modal_title:'Player Portal PIN',
+    acc_pin_modal_desc:'This PIN lets the player log into their own read-only portal to see their stats, games, and manage their own training sessions. Share it with them directly.',
+    acc_btn_remove_pin:'Remove PIN',
+    acc_err_pin_too_short:'PIN must be at least 4 characters.',
+    acc_pin_saved:'PIN saved.',
+    acc_pin_removed:'PIN removed — player can no longer log into their portal until a new one is set.',
     games_ground_autofilled:'&#10003; Auto-filled from season Home Ground: {ground}',
     games_no_home_ground_set:'No Home Ground set for this season yet. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Set one in Settings</a> to auto-fill this field next time.',
     set_lbl_home_ground:'Home Ground',
@@ -2608,6 +2736,36 @@ const TR = {
     tr_progress_title:'Progresso Nesta Época',
     tr_progress_sessions_suffix:'sessões',
     tr_progress_empty:'Conclua uma sessão para começar a acompanhar o progresso.',
+
+    // ── PLAYER PORTAL ──
+    pp_nav_home:'Início', pp_nav_training:'Treino', pp_nav_stats:'As Minhas Estatísticas',
+    pp_home_title:'O Meu Início',
+    pp_next_training:'Próximo Treino',
+    pp_view_training:'Ver Treino',
+    pp_no_training_scheduled:'Sem sessão de treino agendada.',
+    pp_create_training:'+ Criar Sessão de Treino',
+    pp_stats_title:'As Minhas Estatísticas',
+    pp_player_not_found:'Jogador não encontrado.',
+    pp_exit_confirm:'Sair do seu portal de treino? Vai precisar do link e PIN novamente para voltar a entrar.',
+
+    // ── AUTH GATE — ROLE TABS & PLAYER PIN ──
+    acc_role_guardian:'Encarregado', acc_role_player:'Jogador',
+    acc_player_gate_intro:'Introduza o PIN que o seu encarregado lhe deu para ver as suas estatísticas e treino.',
+    acc_lbl_pin:'PIN',
+    acc_btn_player_login:'Entrar',
+    acc_player_pin_note:'Pergunte ao seu encarregado se ainda não tem um PIN.',
+    acc_err_pin_required:'Introduza o seu PIN.',
+    acc_err_pin_invalid:'Esse PIN não corresponde a nenhum jogador. Verifique com o seu encarregado.',
+    acc_player_login_success:'Bem-vindo, {name}!',
+
+    // ── PORTAL PIN MANAGEMENT (Admin/Squad side) ──
+    acc_btn_set_pin:'Definir PIN', acc_btn_manage_pin:'Gerir PIN',
+    acc_pin_modal_title:'PIN do Portal do Jogador',
+    acc_pin_modal_desc:'Este PIN permite ao jogador iniciar sessão no seu próprio portal só de leitura para ver as suas estatísticas, jogos, e gerir as suas próprias sessões de treino. Partilhe-o diretamente com ele(a).',
+    acc_btn_remove_pin:'Remover PIN',
+    acc_err_pin_too_short:'O PIN deve ter pelo menos 4 caracteres.',
+    acc_pin_saved:'PIN guardado.',
+    acc_pin_removed:'PIN removido — o jogador deixa de poder iniciar sessão no portal até ser definido um novo.',
     games_ground_autofilled:'&#10003; Preenchido automaticamente a partir do Recinto da época: {ground}',
     games_no_home_ground_set:'Ainda não definiu o Recinto desta época. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Defina um nas Definições</a> para preencher automaticamente da próxima vez.',
     set_lbl_home_ground:'Recinto',
@@ -3431,6 +3589,8 @@ const State = {
   currentTrackedPlayer: null,
   currentTrackedTab: 'overview',
   gameDetailTab: 'squad',
+  portalPlayerId: null,
+  currentPortalSection: 'home',
 };
 
 const NAV_LABEL_MAP = {
@@ -4747,7 +4907,7 @@ const EVENT_TYPE_ICONS = {
 // can mark a guardian-assigned session as completed (filling in results)
 // but cannot delete or reassign it.
 async function renderPlayerTraining(playerId, viewAs) {
-  const el = document.getElementById(viewAs === 'player' ? 'playerPortalTrainingContent' : `tracked-training-${playerId}`);
+  const el = document.getElementById(viewAs === 'player' ? 'pp-sec-training' : `tracked-training-${playerId}`);
   if (!el) return;
   const player = await DB.get('players', playerId);
   if (!player) return;
@@ -4993,6 +5153,115 @@ function confirmDeleteTrainingSession(sessionId, viewAs) {
     }
   })();
 }
+
+// ── PLAYER PORTAL — HOME PAGE ────────────────────────────────────────────────
+// Mirrors the guardian Home page's spirit (next game, recent results) but
+// built fresh and read-only: no edit buttons, no admin, no settings link.
+async function renderPlayerPortalHome() {
+  const el = document.getElementById('pp-sec-home');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  const player = await DB.get('players', playerId);
+  if (!player) { el.innerHTML = `<p>${I18n.t('pp_player_not_found')}</p>`; return; }
+
+  const games = (await DB.getAll('games','seasonId', State.currentSeasonId)).filter(g => g.date);
+  const allGP = await DB.getAll('gamePlayers','seasonId', State.currentSeasonId);
+  const now = new Date();
+
+  const upcoming = games.filter(g => new Date(`${g.date}T${g.gameTime||'23:59'}`) > now)
+    .sort((a,b) => new Date(a.date) - new Date(b.date));
+  const nextGame = upcoming[0] || null;
+
+  const played = games.filter(g => g.date && new Date(g.date+'T23:59:59') < now)
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  // Next scheduled training session for this player
+  const trainingSessions = await getTrainingSessionsForPlayer(playerId, State.currentSeasonId);
+  const nextTraining = trainingSessions
+    .filter(s => s.status !== 'Completed')
+    .sort((a,b) => new Date(a.scheduledDate||0) - new Date(b.scheduledDate||0))[0] || null;
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('pp_home_title')}</h1><div class="page-header-sub">${esc(shortName(player.fullName))}</div></div></div>
+
+    <!-- NEXT GAME -->
+    ${nextGame ? `
+    <div class="card" style="border:2px solid #111">
+      <div class="card-title">&#9917; ${I18n.t('home_card_next_game')}</div>
+      <div style="font-size:18px;font-weight:700">${esc(nextGame.opponent)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">${homeAwayLabel(nextGame.homeAway)} ${nextGame.venue?'· '+esc(nextGame.venue):''}</div>
+      <div style="font-size:13px;margin-top:8px">${fmtDate(nextGame.date)}${nextGame.gameTime?' · '+nextGame.gameTime:''}</div>
+    </div>` : `
+    <div class="card" style="text-align:center;padding:24px">
+      <p style="color:var(--muted);font-size:13px">${I18n.t('home_no_upcoming')}</p>
+    </div>`}
+
+    <!-- NEXT TRAINING -->
+    <div class="card">
+      <div class="card-title">&#9917; ${I18n.t('pp_next_training')}</div>
+      ${nextTraining ? `
+        <div style="font-weight:700;font-size:14px">${esc(nextTraining.title)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${nextTraining.scheduledDate?fmtDate(nextTraining.scheduledDate):'—'}</div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="Nav.goPortal('training')">${I18n.t('pp_view_training')}</button>
+      ` : `
+        <p style="font-size:12px;color:var(--muted);margin-bottom:8px">${I18n.t('pp_no_training_scheduled')}</p>
+        <button class="btn btn-primary btn-sm" onclick="Nav.goPortal('training')">${I18n.t('pp_create_training')}</button>
+      `}
+    </div>
+
+    <!-- LAST RESULTS -->
+    ${played.length ? `
+    <div class="card">
+      <div class="card-title">${I18n.t('home_card_last_games',{n:Math.min(3,played.length)})}</div>
+      ${played.slice(0,3).map(g => {
+        const gGP = allGP.filter(r => r.gameId === g.gameId);
+        const gOurs = Calc.teamGoals(gGP);
+        const gTheirs = parseInt(g.opponentScore)||0;
+        const gRes = Calc.result(gOurs, gTheirs);
+        const gVisible = isGameResultVisible(g);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-weight:700;font-size:13px">${esc(g.opponent)} <span style="font-weight:400;color:var(--muted);font-size:11px">${homeAwayLabel(g.homeAway)}</span></div>
+            <div style="font-size:10px;color:var(--muted);margin-top:1px">${fmtDate(g.date)}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            ${gVisible ? `<span class="badge badge-${gRes}">${gRes}</span> <span style="font-size:15px;font-weight:700;margin-left:6px">${(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})()}</span>` : `<span class="td-muted" style="font-size:11px">${I18n.t('home_in_progress')}</span>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+  `;
+}
+
+// ── PLAYER PORTAL — MY STATS PAGE ────────────────────────────────────────────
+// Read-only season summary, reusing the same calculation helpers as the
+// guardian-side Overview tab so the numbers are always identical.
+async function renderPlayerPortalStats() {
+  const el = document.getElementById('pp-sec-stats');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  const player = await DB.get('players', playerId);
+  if (!player) return;
+
+  const games = (await DB.getAll('games','seasonId', State.currentSeasonId)).filter(g => g.date);
+  const allGP = await DB.getAll('gamePlayers','seasonId', State.currentSeasonId);
+  const finishedGames = games.filter(g => isGameResultVisible(g));
+  const playerGP = allGP.filter(r => r.playerId === playerId);
+  const s = Calc.lorenzoStats(finishedGames, playerGP);
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('pp_stats_title')}</h1><div class="page-header-sub">${esc(shortName(player.fullName))}</div></div></div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="val">${s.calledUp}</div><div class="lbl">${I18n.t('tp_stat_appearances')}</div></div>
+      <div class="stat-card"><div class="val">${s.started}</div><div class="lbl">${I18n.t('tp_stat_starts')}</div></div>
+      <div class="stat-card"><div class="val">${s.goals}</div><div class="lbl">${I18n.t('tp_stat_goals')}</div></div>
+      <div class="stat-card"><div class="val">${s.assists}</div><div class="lbl">${I18n.t('tp_stat_assists')}</div></div>
+      <div class="stat-card"><div class="val">${s.contributions}</div><div class="lbl">${I18n.t('tp_stat_contributions')}</div></div>
+      <div class="stat-card"><div class="val">${s.mom}</div><div class="lbl">${I18n.t('tp_stat_mom')}</div></div>
+    </div>
+  `;
+}
+
 
 async function renderPlayerEvents(playerId) {
   const el = document.getElementById(`tracked-events-${playerId}`);
@@ -5563,6 +5832,7 @@ const Render = (() => {
           <button class="btn btn-secondary btn-sm" onclick="archivePlayer(${p.playerId},${!p.isActive})" style="margin-left:4px">${p.isActive?I18n.t('common_archive'):I18n.t('common_restore')}</button>
           <button class="btn ${injury?'btn-danger':'btn-secondary'} btn-sm" onclick="openInjuryModal(${p.playerId})" style="margin-left:4px">${injury?I18n.t('squad_btn_manage_injury'):I18n.t('squad_btn_add_injury')}</button>
           <button class="btn btn-secondary btn-sm" onclick="openInjuryHistoryModal(${p.playerId})" style="margin-left:4px">${I18n.t('inj_btn_history')}</button>
+          ${p.trackingStatus==='tracked' ? `<button class="btn btn-secondary btn-sm" onclick="openPortalPinModal(${p.playerId})" style="margin-left:4px">${p.viewerPin?I18n.t('acc_btn_manage_pin'):I18n.t('acc_btn_set_pin')}</button>` : ''}
         </td>
       </tr>`;
     }).join('');
@@ -6569,7 +6839,22 @@ const Nav = (() => {
     }
   }
 
-  return { go, refresh, current: () => current };
+  // ── PLAYER PORTAL NAVIGATION — fully separate from the guardian app's
+  // go(), so there is no shared code path that could accidentally expose a
+  // guardian-only section to the portal.
+  async function goPortal(section) {
+    document.querySelectorAll('#playerPortal .section').forEach(s => s.style.display = 'none');
+    document.getElementById(`pp-sec-${section}`).style.display = '';
+    document.querySelectorAll('#playerPortal .nav-link').forEach(l => {
+      l.classList.toggle('active', l.dataset.portalSection === section);
+    });
+    State.currentPortalSection = section;
+    if (section === 'home')     await renderPlayerPortalHome();
+    if (section === 'training') await renderPlayerTraining(State.portalPlayerId, 'player');
+    if (section === 'stats')    await renderPlayerPortalStats();
+  }
+
+  return { go, refresh, current: () => current, goPortal };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -7486,6 +7771,55 @@ const INJURY_TYPE_KEYS = {
 };
 function injuryTypeLabel(value) {
   return INJURY_TYPE_KEYS[value] ? I18n.t(INJURY_TYPE_KEYS[value]) : (value || '');
+}
+
+// ── PORTAL PIN MANAGEMENT — Squad row, tracked players only ──────────────────
+async function openPortalPinModal(playerId) {
+  const p = await DB.get('players', playerId);
+  if (!p) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'pinModalOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:380px">
+      <h2>${I18n.t('acc_pin_modal_title')} — ${esc(shortName(p.fullName))}</h2>
+      <p style="font-size:12px;color:var(--muted);margin:8px 0 16px">${I18n.t('acc_pin_modal_desc')}</p>
+      <div class="form-grid">
+        <div class="form-group full"><label>${I18n.t('acc_lbl_pin')}</label><input id="pin-value" type="text" inputmode="numeric" maxlength="8" value="${esc(p.viewerPin||'')}" placeholder="e.g. 4821" style="text-align:center;font-size:20px;letter-spacing:3px"></div>
+      </div>
+      <div class="form-actions" style="margin-top:16px;justify-content:flex-end">
+        ${p.viewerPin ? `<button class="btn btn-danger" onclick="removePortalPin(${playerId})">${I18n.t('acc_btn_remove_pin')}</button>` : ''}
+        <button class="btn btn-secondary" onclick="document.getElementById('pinModalOverlay').remove()">${I18n.t('common_cancel')}</button>
+        <button class="btn btn-primary" onclick="savePortalPin(${playerId})">${I18n.t('common_save')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function savePortalPin(playerId) {
+  const pin = document.getElementById('pin-value')?.value.trim();
+  if (!pin || pin.length < 4) {
+    Toast.error(I18n.t('acc_err_pin_too_short'));
+    return;
+  }
+  const p = await DB.get('players', playerId);
+  if (!p) return;
+  p.viewerPin = pin;
+  await DB.put('players', p);
+  document.getElementById('pinModalOverlay')?.remove();
+  Toast.show(I18n.t('acc_pin_saved'));
+  await Render.squad(document.getElementById('squadSearch')?.value||'', document.getElementById('squadFilter')?.value||'');
+}
+
+async function removePortalPin(playerId) {
+  const p = await DB.get('players', playerId);
+  if (!p) return;
+  p.viewerPin = null;
+  await DB.put('players', p);
+  document.getElementById('pinModalOverlay')?.remove();
+  Toast.show(I18n.t('acc_pin_removed'));
+  await Render.squad(document.getElementById('squadSearch')?.value||'', document.getElementById('squadFilter')?.value||'');
 }
 
 async function openInjuryModal(playerId) {
