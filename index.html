@@ -953,7 +953,13 @@ function renderAuthGate() {
     <div id="authRolePanel-player" style="display:none">
       <p style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:center">${I18n.t('acc_player_gate_intro')}</p>
       <div class="form-grid" style="margin-bottom:12px">
-        <div class="form-group full"><label>${I18n.t('acc_lbl_pin')}</label><input id="player-pin" type="text" inputmode="numeric" maxlength="8" placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:4px" autocomplete="off"></div>
+        <div class="form-group full">
+          <label>${I18n.t('acc_lbl_pin')}</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input id="player-pin" type="password" inputmode="numeric" maxlength="8" placeholder="••••" style="flex:1;min-width:0;max-width:100%;box-sizing:border-box;text-align:center;font-size:20px;letter-spacing:3px" autocomplete="off">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="togglePinVisibility()" id="pin-toggle-btn" style="flex-shrink:0">&#128065;</button>
+          </div>
+        </div>
       </div>
       <div id="player-pin-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
       <button class="btn btn-primary" style="width:100%" onclick="handlePlayerPinSubmit()">${I18n.t('acc_btn_player_login')}</button>
@@ -967,6 +973,15 @@ function switchAuthRoleTab(role) {
   document.getElementById('role-tab-player')?.classList.toggle('active-tab', role==='player');
   document.getElementById('authRolePanel-guardian').style.display = role==='guardian' ? '' : 'none';
   document.getElementById('authRolePanel-player').style.display = role==='player' ? '' : 'none';
+}
+
+function togglePinVisibility() {
+  const input = document.getElementById('player-pin');
+  const btn = document.getElementById('pin-toggle-btn');
+  if (!input || !btn) return;
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  btn.innerHTML = showing ? '&#128065;' : '&#128064;&#65039;';
 }
 
 // ── PLAYER PIN LOGIN ──────────────────────────────────────────────────────────
