@@ -48,11 +48,16 @@ nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--nav
 .nav-season{color:#9aa5b1;font-size:10px;font-weight:500;margin-left:6px;border-left:1px solid rgba(255,255,255,.2);padding-left:8px}
 .nav-links{display:flex;gap:2px;align-items:center}
 .nav-link{color:#ccc;font-size:12px;padding:6px 10px;border-radius:var(--radius);cursor:pointer;border:none;background:none;white-space:nowrap;transition:all .15s}
+.nav-account-btn{color:#ccc;font-size:15px;padding:6px 10px;border-radius:var(--radius);cursor:pointer;border:none;background:none;transition:all .15s}
+.nav-account-btn:hover{color:#fff;background:rgba(255,255,255,.1)}
 .nav-link:hover{color:#fff;background:rgba(255,255,255,.1)}
 .nav-link.active{color:#fff;background:rgba(255,255,255,.18);font-weight:700}
 .hamburger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:6px;background:none;border:none}
 .hamburger span{display:block;width:22px;height:2px;background:#fff;transition:.2s}
 .mobile-menu{display:none;position:fixed;top:var(--nav-h);left:0;right:0;background:var(--navy);z-index:99;padding:8px;flex-direction:column;gap:2px}
+.nav-account-menu{position:fixed;top:var(--nav-h);right:12px;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.18);z-index:101;min-width:220px;padding:14px}
+.nav-account-menu .nam-email{font-size:12px;font-weight:700;color:var(--dark);word-break:break-all;margin-bottom:2px}
+.nav-account-menu .nam-note{font-size:11px;color:var(--muted);margin-bottom:10px}
 .mobile-menu.open{display:flex}
 .mobile-menu .nav-link{text-align:left;padding:10px 14px;font-size:13px}
 
@@ -445,11 +450,13 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <button class="nav-link" data-section="settings"><span data-nav-label>Settings</span></button>
     <button class="nav-link" data-section="help">? <span data-nav-label>Help</span></button>
     <button class="nav-link" id="adminNavBtn" data-section="admin" style="display:none;background:rgba(255,200,0,.15);color:#ffd700">&#9881; <span data-nav-label>Admin</span></button>
+    <button class="nav-account-btn" id="navAccountBtn" onclick="toggleNavAccountMenu(event)" title="">&#128100;</button>
   </div>
   <button class="hamburger" id="hamburger" aria-label="Menu">
     <span></span><span></span><span></span>
   </button>
 </nav>
+<div id="navAccountMenu" class="nav-account-menu" style="display:none"></div>
 <div class="mobile-menu" id="mobileMenu">
   <button class="nav-link" data-section="home">&#127968; <span data-nav-label>Home</span></button>
   <button class="nav-link" data-section="dashboard">&#128202; <span data-nav-label>Dashboard</span></button>
@@ -460,6 +467,10 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
   <button class="nav-link" data-section="settings"><span data-nav-label>Settings</span></button>
   <button class="nav-link" data-section="help">? <span data-nav-label>Help</span></button>
   <button class="nav-link" id="adminNavBtnMobile" data-section="admin" style="display:none;color:#ffd700">&#9881; <span data-nav-label>Admin</span></button>
+  <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:6px">
+    <div id="mobileAccountInfo" style="padding:8px 12px;font-size:11px;color:#9aa5b1"></div>
+    <button class="nav-link" onclick="handleLogout()">&#128274; <span data-i18n="acc_btn_logout">Log Out</span></button>
+  </div>
 </div>
 
 <!-- MAIN -->
@@ -1016,6 +1027,7 @@ async function handleAccountSubmit() {
       await continueAppLoadAfterLogin();
     } else {
       renderAccountCard();
+      updateNavAccountIndicator();
       Sync.updateSyncUI();
     }
   } catch(err) {
@@ -1055,15 +1067,62 @@ async function claimLocalDataForAccount() {
 }
 
 async function handleLogout() {
-  Confirm.show(I18n.t('acc_confirm_logout_title'), I18n.t('acc_confirm_logout_body'), async () => {
-    await Auth.logout();
-    Toast.show(I18n.t('acc_logout_success'));
-    // Hide the app immediately and show the gate again — logging out means
-    // no data should remain visible on screen.
-    document.getElementById('app').style.display = 'none';
-    renderAuthGate();
-    document.getElementById('authGate').style.display = 'flex';
-  });
+  // Uses the browser's own native confirm() rather than the app's custom
+  // Confirm.show — that component already caused one real lockout (it can
+  // end up hidden behind a full-screen overlay with no way to reach its
+  // buttons). The native dialog is rendered by the browser itself and can
+  // never be covered by anything in the page.
+  if (!window.confirm(I18n.t('acc_confirm_logout_body'))) return;
+  await Auth.logout();
+  Toast.show(I18n.t('acc_logout_success'));
+  closeNavAccountMenu();
+  // Hide the app immediately and show the gate again — logging out means
+  // no data should remain visible on screen.
+  document.getElementById('app').style.display = 'none';
+  renderAuthGate();
+  document.getElementById('authGate').style.display = 'flex';
+}
+
+// ── NAV ACCOUNT MENU — small always-visible indicator + dropdown ────────────
+function updateNavAccountIndicator() {
+  const btn = document.getElementById('navAccountBtn');
+  const mobileInfo = document.getElementById('mobileAccountInfo');
+  if (btn) {
+    btn.title = Auth.getEmail() ? Auth.getEmail() : I18n.t('acc_nav_no_email');
+  }
+  if (mobileInfo) {
+    mobileInfo.textContent = Auth.getEmail()
+      ? I18n.t('acc_logged_in_as') + ': ' + Auth.getEmail()
+      : I18n.t('acc_nav_no_email');
+  }
+}
+
+function toggleNavAccountMenu(evt) {
+  if (evt) evt.stopPropagation();
+  const menu = document.getElementById('navAccountMenu');
+  if (!menu) return;
+  const isOpen = menu.style.display !== 'none';
+  if (isOpen) { closeNavAccountMenu(); return; }
+  menu.innerHTML = `
+    <div class="nam-email">${esc(Auth.getEmail() || I18n.t('acc_nav_no_email'))}</div>
+    <div class="nam-note">${Auth.getEmail() ? I18n.t('acc_logged_in_note') : I18n.t('acc_bypass_active')}</div>
+    <button class="btn btn-danger btn-sm" style="width:100%" onclick="closeNavAccountMenu();handleLogout()">${I18n.t('acc_btn_logout')}</button>
+  `;
+  menu.style.display = 'block';
+  // Close when tapping anywhere outside the menu
+  setTimeout(() => document.addEventListener('click', _navAccountMenuOutsideClick), 0);
+}
+
+function closeNavAccountMenu() {
+  const menu = document.getElementById('navAccountMenu');
+  if (menu) menu.style.display = 'none';
+  document.removeEventListener('click', _navAccountMenuOutsideClick);
+}
+
+function _navAccountMenuOutsideClick(e) {
+  const menu = document.getElementById('navAccountMenu');
+  const btn = document.getElementById('navAccountBtn');
+  if (menu && !menu.contains(e.target) && e.target !== btn) closeNavAccountMenu();
 }
 
 // ── OPPONENTS CATALOGUE — SETTINGS TAB ───────────────────────────────────────
@@ -1696,6 +1755,7 @@ const TR = {
     acc_bypass_confirm_title:'Continue Without an Account',
     acc_bypass_confirm_body:'This lets you use the app right now without logging in. Your data stays on this device and will not sync to the cloud until you log into a real account later — nothing will be lost, it just stays local until then. Continue?',
     acc_bypass_active:'Working offline without an account. Log in later to enable cloud sync.',
+    acc_nav_no_email:'Working offline, no account',
     games_ground_autofilled:'&#10003; Auto-filled from season Home Ground: {ground}',
     games_no_home_ground_set:'No Home Ground set for this season yet. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Set one in Settings</a> to auto-fill this field next time.',
     set_lbl_home_ground:'Home Ground',
@@ -2403,6 +2463,7 @@ const TR = {
     acc_bypass_confirm_title:'Continuar Sem Conta',
     acc_bypass_confirm_body:'Isto permite usar a aplicação agora sem iniciar sessão. Os seus dados ficam neste dispositivo e não sincronizam com a nuvem até iniciar sessão numa conta real mais tarde — nada se perde, fica apenas local até então. Continuar?',
     acc_bypass_active:'A trabalhar offline sem conta. Inicie sessão mais tarde para ativar a sincronização.',
+    acc_nav_no_email:'A trabalhar offline, sem conta',
     games_ground_autofilled:'&#10003; Preenchido automaticamente a partir do Recinto da época: {ground}',
     games_no_home_ground_set:'Ainda não definiu o Recinto desta época. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Defina um nas Definições</a> para preencher automaticamente da próxima vez.',
     set_lbl_home_ground:'Recinto',
@@ -5635,6 +5696,12 @@ const Render = (() => {
     };
 
     el.innerHTML = `
+      <!-- Account — always visible at the top of Settings, not buried in a sub-tab -->
+      <div class="settings-section">
+        <h3>&#128100; ${I18n.t('acc_title')}</h3>
+        <div class="card" id="accountCard"></div>
+      </div>
+
       <!-- Settings Tabs -->
       <div class="tab-bar-row">
         <button class="import-tab active-tab" id="stab-seasons" onclick="switchSettingsTab('seasons')">${I18n.t('set_tab_seasons')}</button>
@@ -5864,12 +5931,6 @@ const Render = (() => {
 
       <!-- SYNC TAB -->
       <div id="stab-panel-sync" style="display:none">
-      <!-- Account — login required for cloud sync, app works fully offline without it -->
-      <div class="settings-section">
-        <h3>&#128100; ${I18n.t('acc_title')}</h3>
-        <div class="card" id="accountCard"></div>
-      </div>
-
       <!-- Cloud Sync -->
       <div class="settings-section">
         <h3>&#9729; ${I18n.t('set_cloud_sync')}</h3>
@@ -5922,6 +5983,7 @@ const Render = (() => {
     // Default to seasons tab
     switchSettingsTab('seasons');
     updateSeasonNamePreview();
+    renderAccountCard();
 
     // Update sync status bar and pending count
     Sync.updateSyncUI();
@@ -7935,6 +7997,7 @@ async function continueAppLoadAfterLogin() {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+    updateNavAccountIndicator();
 
     // ── Restore last visited page after refresh ──────────────────────────────
     let restoredSection = 'home';
@@ -8413,9 +8476,6 @@ function switchSettingsTab(tab) {
   }
   if (tab === 'opponents') {
     renderOpponentsTab();
-  }
-  if (tab === 'sync') {
-    renderAccountCard();
   }
 }
 
