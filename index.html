@@ -907,7 +907,10 @@ function renderAuthGate() {
 // later, at which point the existing local-data-claiming logic picks it up
 // exactly like any other first login.
 async function handleEmergencyBypass() {
-  Confirm.show(I18n.t('acc_bypass_confirm_title'), I18n.t('acc_bypass_confirm_body'), async () => {
+  // No confirmation modal here on purpose — this is an emergency path and
+  // must not depend on any other UI component that could itself be broken
+  // or hidden behind the full-screen auth gate's own overlay.
+  try {
     const fakeSession = {
       accessToken: null,
       refreshToken: null,
@@ -920,8 +923,9 @@ async function handleEmergencyBypass() {
     await Auth.loadSession();
     document.getElementById('authGate').style.display = 'none';
     await continueAppLoadAfterLogin();
-    Toast.show(I18n.t('acc_bypass_active'));
-  });
+  } catch(err) {
+    alert('Bypass failed: ' + err.message);
+  }
 }
 
 // ── ACCOUNT CARD — Settings → Cloud Sync tab ─────────────────────────────────
