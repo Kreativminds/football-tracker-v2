@@ -50,6 +50,7 @@ nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--nav
 .nav-link{color:#ccc;font-size:12px;padding:6px 10px;border-radius:var(--radius);cursor:pointer;border:none;background:none;white-space:nowrap;transition:all .15s}
 .nav-account-btn{color:#ccc;font-size:15px;padding:6px 10px;border-radius:var(--radius);cursor:pointer;border:none;background:none;transition:all .15s}
 .nav-account-btn:hover{color:#fff;background:rgba(255,255,255,.1)}
+.nav-account-btn-active{color:#fff!important;background:rgba(255,255,255,.18)!important;font-weight:700}
 .nav-link:hover{color:#fff;background:rgba(255,255,255,.1)}
 .nav-link.active{color:#fff;background:rgba(255,255,255,.18);font-weight:700}
 .hamburger{display:none;flex-direction:column;gap:4px;cursor:pointer;padding:6px;background:none;border:none}
@@ -447,16 +448,20 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <span class="nav-season" id="playerPortalName"></span>
     </div>
     <div class="nav-links">
-      <button class="nav-link active" data-portal-section="home" onclick="Nav.goPortal('home')">&#127968; <span data-i18n="pp_nav_home">Home</span></button>
-      <button class="nav-link" data-portal-section="training" onclick="Nav.goPortal('training')">&#9917; <span data-i18n="pp_nav_training">Training</span></button>
-      <button class="nav-link" data-portal-section="stats" onclick="Nav.goPortal('stats')">&#128202; <span data-i18n="pp_nav_stats">My Stats</span></button>
+      <button class="nav-account-btn nav-account-btn-active" data-portal-section="home" onclick="Nav.goPortal('home')">&#127968; <span data-i18n="pp_nav_home">Home</span></button>
+      <button class="nav-account-btn" data-portal-section="dashboard" onclick="Nav.goPortal('dashboard')">&#128202; <span data-i18n="pp_nav_dashboard">Dashboard</span></button>
+      <button class="nav-account-btn" data-portal-section="training" onclick="Nav.goPortal('training')">&#9917; <span data-i18n="pp_nav_training">Training</span></button>
+      <button class="nav-account-btn" data-portal-section="games" onclick="Nav.goPortal('games')">&#127944; <span data-i18n="pp_nav_games">Games</span></button>
+      <button class="nav-account-btn" data-portal-section="clubs" onclick="Nav.goPortal('clubs')">&#127942; <span data-i18n="pp_nav_clubs">Club History</span></button>
     </div>
     <button class="nav-account-btn" onclick="handlePlayerPortalExit()" title="">&#128274;</button>
   </nav>
   <div class="main-content">
     <div class="section active" id="pp-sec-home"></div>
+    <div class="section" id="pp-sec-dashboard" style="display:none"></div>
     <div class="section" id="pp-sec-training" style="display:none"></div>
-    <div class="section" id="pp-sec-stats" style="display:none"></div>
+    <div class="section" id="pp-sec-games" style="display:none"></div>
+    <div class="section" id="pp-sec-clubs" style="display:none"></div>
   </div>
 </div>
 
@@ -989,6 +994,7 @@ async function handlePlayerPinSubmit() {
   }
 
   State.portalPlayerId = match.playerId;
+  await DB.put('appMeta', { metaKey: 'portalPlayerId', value: match.playerId });
   document.getElementById('authGate').style.display = 'none';
   document.getElementById('playerPortal').style.display = 'flex';
   document.getElementById('playerPortalName').textContent = shortName(match.fullName);
@@ -1173,10 +1179,11 @@ async function handleLogout() {
   document.getElementById('authGate').style.display = 'flex';
 }
 
-function handlePlayerPortalExit() {
+async function handlePlayerPortalExit() {
   if (!window.confirm(I18n.t('pp_exit_confirm'))) return;
   document.getElementById('playerPortal').style.display = 'none';
   State.portalPlayerId = null;
+  await DB.del('appMeta', 'portalPlayerId').catch(()=>{});
   renderAuthGate();
   document.getElementById('authGate').style.display = 'flex';
 }
@@ -1987,6 +1994,10 @@ const TR = {
     acc_err_pin_too_short:'PIN must be at least 4 characters.',
     acc_pin_saved:'PIN saved.',
     acc_pin_removed:'PIN removed — player can no longer log into their portal until a new one is set.',
+
+    // ── PLAYER PORTAL — EXPANDED NAV ──
+    pp_nav_dashboard:'Dashboard', pp_nav_games:'Games', pp_nav_clubs:'Club History',
+    pp_training_tab_new:'New Session', pp_training_tab_history:'History',
     games_ground_autofilled:'&#10003; Auto-filled from season Home Ground: {ground}',
     games_no_home_ground_set:'No Home Ground set for this season yet. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Set one in Settings</a> to auto-fill this field next time.',
     set_lbl_home_ground:'Home Ground',
@@ -2766,6 +2777,10 @@ const TR = {
     acc_err_pin_too_short:'O PIN deve ter pelo menos 4 caracteres.',
     acc_pin_saved:'PIN guardado.',
     acc_pin_removed:'PIN removido — o jogador deixa de poder iniciar sessão no portal até ser definido um novo.',
+
+    // ── PLAYER PORTAL — EXPANDED NAV ──
+    pp_nav_dashboard:'Dashboard', pp_nav_games:'Jogos', pp_nav_clubs:'Histórico de Clubes',
+    pp_training_tab_new:'Nova Sessão', pp_training_tab_history:'Histórico',
     games_ground_autofilled:'&#10003; Preenchido automaticamente a partir do Recinto da época: {ground}',
     games_no_home_ground_set:'Ainda não definiu o Recinto desta época. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Defina um nas Definições</a> para preencher automaticamente da próxima vez.',
     set_lbl_home_ground:'Recinto',
@@ -4085,6 +4100,7 @@ async function buildTrackedNav() {
           <div class="page-header-sub" id="tracked-subtitle-${p.playerId}"></div>
         </div>
         <div class="btn-group">
+          <button class="btn btn-secondary btn-sm" onclick="openPortalPinModal(${p.playerId})">${p.viewerPin?I18n.t('acc_btn_manage_pin'):I18n.t('acc_btn_set_pin')}</button>
           <button class="btn btn-secondary btn-sm no-print" onclick="window.print()">${I18n.t('tp_btn_export_pdf')}</button>
         </div>
       </div>
@@ -4907,7 +4923,7 @@ const EVENT_TYPE_ICONS = {
 // can mark a guardian-assigned session as completed (filling in results)
 // but cannot delete or reassign it.
 async function renderPlayerTraining(playerId, viewAs) {
-  const el = document.getElementById(viewAs === 'player' ? 'pp-sec-training' : `tracked-training-${playerId}`);
+  const el = document.getElementById(viewAs === 'player' ? 'pp-training-content' : `tracked-training-${playerId}`);
   if (!el) return;
   const player = await DB.get('players', playerId);
   if (!player) return;
@@ -5237,7 +5253,7 @@ async function renderPlayerPortalHome() {
 // Read-only season summary, reusing the same calculation helpers as the
 // guardian-side Overview tab so the numbers are always identical.
 async function renderPlayerPortalStats() {
-  const el = document.getElementById('pp-sec-stats');
+  const el = document.getElementById('pp-sec-dashboard');
   if (!el) return;
   const playerId = State.portalPlayerId;
   const player = await DB.get('players', playerId);
@@ -5259,6 +5275,101 @@ async function renderPlayerPortalStats() {
       <div class="stat-card"><div class="val">${s.contributions}</div><div class="lbl">${I18n.t('tp_stat_contributions')}</div></div>
       <div class="stat-card"><div class="val">${s.mom}</div><div class="lbl">${I18n.t('tp_stat_mom')}</div></div>
     </div>
+  `;
+}
+
+// ── PORTAL — TRAINING SHELL (New Session / History sub-tabs) ────────────────
+// Wraps the existing renderPlayerTraining (Pass 2/3) — which already shows
+// both the create button and the full session list/history in one view —
+// behind two clearly-labeled sub-tabs as requested, without duplicating any
+// of that underlying logic.
+async function renderPlayerTrainingShell(playerId) {
+  const el = document.getElementById('pp-sec-training');
+  if (!el) return;
+  const currentSub = State.portalTrainingSubTab || 'new';
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('tr_title')}</h1></div></div>
+    <div class="tab-bar-row">
+      <button class="import-tab ${currentSub==='new'?'active-tab':''}" id="pp-tr-tab-new" onclick="switchPortalTrainingSubTab('new')">${I18n.t('pp_training_tab_new')}</button>
+      <button class="import-tab ${currentSub==='history'?'active-tab':''}" id="pp-tr-tab-history" onclick="switchPortalTrainingSubTab('history')">${I18n.t('pp_training_tab_history')}</button>
+    </div>
+    <div id="pp-training-content"></div>
+  `;
+  await renderPlayerTraining(playerId, 'player');
+}
+
+function switchPortalTrainingSubTab(tab) {
+  State.portalTrainingSubTab = tab;
+  document.getElementById('pp-tr-tab-new')?.classList.toggle('active-tab', tab==='new');
+  document.getElementById('pp-tr-tab-history')?.classList.toggle('active-tab', tab==='history');
+  // renderPlayerTraining already shows the create button + full session list
+  // together; the sub-tab here just scrolls/focuses the relevant part so it
+  // reads as two distinct views without needing two separate data fetches.
+  if (tab === 'history') {
+    document.querySelector('#pp-sec-training .who-played-list')?.scrollIntoView({behavior:'smooth', block:'start'});
+  } else {
+    document.querySelector('#pp-sec-training .form-panel, #pp-sec-training .btn-primary')?.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+}
+
+// ── PORTAL — ALL GAMES (read-only) ───────────────────────────────────────────
+async function renderPlayerPortalGames() {
+  const el = document.getElementById('pp-sec-games');
+  if (!el) return;
+  const games = (await DB.getAll('games','seasonId', State.currentSeasonId)).filter(g => g.date);
+  const allGP = await DB.getAll('gamePlayers','seasonId', State.currentSeasonId);
+  games.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('pp_nav_games')}</h1></div></div>
+    ${!games.length ? `<div class="empty"><strong>${I18n.t('games_no_games_title')}</strong></div>` : `
+    <div class="who-played-list">
+      ${games.map(g => {
+        const gGP = allGP.filter(r => r.gameId === g.gameId);
+        const gOurs = Calc.teamGoals(gGP);
+        const gTheirs = parseInt(g.opponentScore)||0;
+        const gRes = Calc.result(gOurs, gTheirs);
+        const gVisible = isGameResultVisible(g);
+        return `<div class="wp-row">
+          <div class="wp-info" style="cursor:default">
+            <span class="wp-num">${gVisible?gRes:'—'}</span>
+            <span class="wp-name">${esc(g.opponent)}</span>
+            <span class="pos-pill" style="margin-left:auto">${fmtDate(g.date)}</span>
+            <span style="margin-left:6px;font-size:12px;font-weight:700">${gVisible?(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})():I18n.t('games_status_upcoming')}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`}
+  `;
+}
+
+// ── PORTAL — CLUB HISTORY (read-only) ────────────────────────────────────────
+async function renderPlayerPortalClubs() {
+  const el = document.getElementById('pp-sec-clubs');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  const player = await DB.get('players', playerId);
+  const all = await DB.getAll('clubHistory', 'playerId', playerId);
+  all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('ch_title')}</h1></div></div>
+    ${!all.length ? `<div class="empty"><strong>${I18n.t('ch_empty_title')}</strong></div>` : `
+    <div class="timeline-list">
+      ${all.map(c => `
+        <div class="timeline-item">
+          <div style="display:flex;gap:12px;align-items:flex-start">
+            ${c.logoUrl?`<img src="${esc(c.logoUrl)}" style="width:40px;height:40px;object-fit:contain;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`:
+            `<div style="width:40px;height:40px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">&#127944;</div>`}
+            <div>
+              <div class="ti-title">${esc(c.clubName)} ${c.ageGroup?`<span class="pos-pill">${esc(c.ageGroup)}</span>`:''}</div>
+              <div class="ti-meta">${c.season||''} ${c.startDate?'· '+fmtDate(c.startDate):''} ${c.endDate?'→ '+fmtDate(c.endDate):I18n.t('ch_present')}</div>
+              ${c.coachName?`<div class="ti-meta">${I18n.t('ch_coach_prefix')} ${esc(c.coachName)}</div>`:''}
+              ${c.notes?`<div class="ti-desc">${esc(c.notes)}</div>`:''}
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`}
   `;
 }
 
@@ -5832,7 +5943,6 @@ const Render = (() => {
           <button class="btn btn-secondary btn-sm" onclick="archivePlayer(${p.playerId},${!p.isActive})" style="margin-left:4px">${p.isActive?I18n.t('common_archive'):I18n.t('common_restore')}</button>
           <button class="btn ${injury?'btn-danger':'btn-secondary'} btn-sm" onclick="openInjuryModal(${p.playerId})" style="margin-left:4px">${injury?I18n.t('squad_btn_manage_injury'):I18n.t('squad_btn_add_injury')}</button>
           <button class="btn btn-secondary btn-sm" onclick="openInjuryHistoryModal(${p.playerId})" style="margin-left:4px">${I18n.t('inj_btn_history')}</button>
-          ${p.trackingStatus==='tracked' ? `<button class="btn btn-secondary btn-sm" onclick="openPortalPinModal(${p.playerId})" style="margin-left:4px">${p.viewerPin?I18n.t('acc_btn_manage_pin'):I18n.t('acc_btn_set_pin')}</button>` : ''}
         </td>
       </tr>`;
     }).join('');
@@ -6845,13 +6955,15 @@ const Nav = (() => {
   async function goPortal(section) {
     document.querySelectorAll('#playerPortal .section').forEach(s => s.style.display = 'none');
     document.getElementById(`pp-sec-${section}`).style.display = '';
-    document.querySelectorAll('#playerPortal .nav-link').forEach(l => {
-      l.classList.toggle('active', l.dataset.portalSection === section);
+    document.querySelectorAll('#playerPortal .nav-account-btn[data-portal-section]').forEach(l => {
+      l.classList.toggle('nav-account-btn-active', l.dataset.portalSection === section);
     });
     State.currentPortalSection = section;
-    if (section === 'home')     await renderPlayerPortalHome();
-    if (section === 'training') await renderPlayerTraining(State.portalPlayerId, 'player');
-    if (section === 'stats')    await renderPlayerPortalStats();
+    if (section === 'home')      await renderPlayerPortalHome();
+    if (section === 'dashboard') await renderPlayerPortalStats();
+    if (section === 'training')  await renderPlayerTrainingShell(State.portalPlayerId);
+    if (section === 'games')     await renderPlayerPortalGames();
+    if (section === 'clubs')     await renderPlayerPortalClubs();
   }
 
   return { go, refresh, current: () => current, goPortal };
@@ -8738,6 +8850,28 @@ async function init() {
     await Sync.loadConfig();
     await Auth.loadSession();
 
+    // ── PLAYER PORTAL SESSION CHECK ──────────────────────────────────────────
+    // A player who logged in with their PIN stays logged in across a refresh
+    // too, exactly like the guardian's session — checked first since a
+    // device showing the player portal should never silently drop back to
+    // the guardian gate just because the page reloaded.
+    const portalMeta = await DB.get('appMeta', 'portalPlayerId');
+    if (portalMeta && portalMeta.value) {
+      const portalPlayer = await DB.get('players', portalMeta.value);
+      if (portalPlayer) {
+        State.portalPlayerId = portalPlayer.playerId;
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('playerPortal').style.display = 'flex';
+        document.getElementById('playerPortalName').textContent = shortName(portalPlayer.fullName);
+        await Nav.goPortal('home');
+        return; // stop here — never fall through to the guardian gate or app
+      } else {
+        // The player record this PIN pointed to no longer exists — clear
+        // the stale session rather than getting stuck.
+        await DB.del('appMeta', 'portalPlayerId').catch(()=>{});
+      }
+    }
+
     // ── AUTH GATE ──────────────────────────────────────────────────────────
     // No saved session at all means this device/browser has never logged in
     // successfully — show the login/signup screen instead of any app data.
@@ -8852,6 +8986,21 @@ async function continueAppLoadAfterLogin() {
     console.error(e);
   }
 }
+
+// ── LIVE RESULT VISIBILITY REFRESH ───────────────────────────────────────────
+// isGameResultVisible() is a pure calculation re-evaluated on every render —
+// it does not update itself while a page is just sitting open. If you load
+// Home while a game is still in progress and then never navigate away, the
+// page keeps showing "in progress" even after the cutoff passes, because
+// nothing re-renders it. This timer re-renders Home/Dashboard every 2
+// minutes if either is the currently open page, so a finished game's result
+// appears on its own without needing to leave and come back.
+setInterval(() => {
+  if (!Auth.isLoggedIn()) return;
+  const current = Nav.current();
+  if (current === 'home') Render.home();
+  if (current === 'dashboard') Render.dashboard();
+}, 120000);
 
 // Auto-sync when coming back online
 window.addEventListener('online', () => {
