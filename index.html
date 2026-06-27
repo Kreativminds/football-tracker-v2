@@ -10,7 +10,7 @@
 <style>
 /* ── RESET & BASE ─────────────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;font-family:'Montserrat',Arial,sans-serif;font-size:14px;background:#F2F4F7;color:#111}
+html,body{height:100%;font-family:'Montserrat',Arial,sans-serif;font-size:14px;background:#F2F4F7;color:#111;overflow-x:hidden}
 button{font-family:'Montserrat',Arial,sans-serif;cursor:pointer}
 input,select,textarea{font-family:'Montserrat',Arial,sans-serif;font-size:13px}
 a{color:#111;text-decoration:none}
@@ -448,7 +448,6 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <div class="nav-wordmark" id="playerPortalPageName">Next<b>Eleven</b></div>
       <span class="nav-season" id="playerPortalName"></span>
     </div>
-    <button class="nav-account-btn" onclick="handlePlayerPortalExit()" title="" style="margin-right:6px">&#128274;</button>
     <button class="hamburger" id="portalHamburger" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
@@ -459,6 +458,12 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <button class="nav-link" data-portal-section="training" onclick="Nav.goPortal('training');document.getElementById('portalMobileMenu').classList.remove('open')">&#9917; <span data-i18n="pp_nav_training">Training</span></button>
     <button class="nav-link" data-portal-section="games" onclick="Nav.goPortal('games');document.getElementById('portalMobileMenu').classList.remove('open')">&#127944; <span data-i18n="pp_nav_games">Games</span></button>
     <button class="nav-link" data-portal-section="clubs" onclick="Nav.goPortal('clubs');document.getElementById('portalMobileMenu').classList.remove('open')">&#127942; <span data-i18n="pp_nav_clubs">Club History</span></button>
+    <button class="nav-link" data-portal-section="achievements" onclick="Nav.goPortal('achievements');document.getElementById('portalMobileMenu').classList.remove('open')">&#127941; <span data-i18n="pp_nav_achievements">Achievements</span></button>
+    <button class="nav-link" data-portal-section="events" onclick="Nav.goPortal('events');document.getElementById('portalMobileMenu').classList.remove('open')">&#128197; <span data-i18n="pp_nav_events">Events</span></button>
+    <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:6px">
+      <div id="portalMobileAccountInfo" style="padding:8px 12px;font-size:11px;color:#9aa5b1"></div>
+      <button class="nav-link" onclick="handlePlayerPortalExit()">&#128274; <span data-i18n="acc_btn_logout">Log Out</span></button>
+    </div>
   </div>
   <div class="main-content">
     <div class="section active" id="pp-sec-home"></div>
@@ -466,6 +471,8 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <div class="section" id="pp-sec-training" style="display:none"></div>
     <div class="section" id="pp-sec-games" style="display:none"></div>
     <div class="section" id="pp-sec-clubs" style="display:none"></div>
+    <div class="section" id="pp-sec-achievements" style="display:none"></div>
+    <div class="section" id="pp-sec-events" style="display:none"></div>
   </div>
 </div>
 
@@ -1017,6 +1024,8 @@ async function handlePlayerPinSubmit() {
   document.getElementById('authGate').style.display = 'none';
   document.getElementById('playerPortal').style.display = 'flex';
   document.getElementById('playerPortalName').textContent = shortName(match.fullName);
+  const portalInfoEl1 = document.getElementById('portalMobileAccountInfo');
+  if (portalInfoEl1) portalInfoEl1.textContent = I18n.t('acc_logged_in_as') + ': ' + shortName(match.fullName);
   setupPlayerPortalNav();
   // Make sure the season/meta context is loaded the same way the guardian
   // app loads it, since the portal reuses the same season-scoped data.
@@ -2033,6 +2042,7 @@ const TR = {
 
     // ── PLAYER PORTAL — EXPANDED NAV ──
     pp_nav_dashboard:'Dashboard', pp_nav_games:'Games', pp_nav_clubs:'Club History',
+    pp_nav_achievements:'Achievements', pp_nav_events:'Events',
     pp_training_tab_new:'New Session', pp_training_tab_history:'History',
     pp_assist_by:'Assist by',
     pp_not_called_up_section:'Not called up',
@@ -2818,6 +2828,7 @@ const TR = {
 
     // ── PLAYER PORTAL — EXPANDED NAV ──
     pp_nav_dashboard:'Dashboard', pp_nav_games:'Jogos', pp_nav_clubs:'Histórico de Clubes',
+    pp_nav_achievements:'Conquistas', pp_nav_events:'Eventos',
     pp_training_tab_new:'Nova Sessão', pp_training_tab_history:'Histórico',
     pp_assist_by:'Assistência de',
     pp_not_called_up_section:'Não convocados',
@@ -5307,16 +5318,68 @@ async function renderPlayerPortalStats() {
   const playerGP = allGP.filter(r => r.playerId === playerId);
   const s = Calc.lorenzoStats(finishedGames, playerGP);
 
+  const sortedGames = [...games].sort((a,b) => new Date(b.date) - new Date(a.date));
+  const last5 = sortedGames.slice(0,5);
+  const posEntries = Object.entries(s.positionBreakdown).sort((a,b) => b[1]-a[1]);
+
   el.innerHTML = `
     <div class="page-header"><div><h1>${I18n.t('pp_stats_title')}</h1><div class="page-header-sub">${esc(shortName(player.fullName))}</div></div></div>
     <div class="stat-grid">
       <div class="stat-card"><div class="val">${s.calledUp}</div><div class="lbl">${I18n.t('tp_stat_appearances')}</div></div>
-      <div class="stat-card"><div class="val">${s.started}</div><div class="lbl">${I18n.t('tp_stat_starts')}</div></div>
+      <div class="stat-card"><div class="val">${s.started}</div><div class="lbl">${I18n.t('tp_stat_starts')}</div><div class="sub">${s.subbed} ${I18n.t('tp_stat_as_sub')}</div></div>
       <div class="stat-card"><div class="val">${s.goals}</div><div class="lbl">${I18n.t('tp_stat_goals')}</div></div>
       <div class="stat-card"><div class="val">${s.assists}</div><div class="lbl">${I18n.t('tp_stat_assists')}</div></div>
       <div class="stat-card"><div class="val">${s.contributions}</div><div class="lbl">${I18n.t('tp_stat_contributions')}</div></div>
+      <div class="stat-card"><div class="val">${s.fullGames}</div><div class="lbl">${I18n.t('tp_stat_full_games')}</div></div>
+      <div class="stat-card"><div class="val">${s.minutes}</div><div class="lbl">${I18n.t('tp_stat_est_minutes')}</div></div>
       <div class="stat-card"><div class="val">${s.mom}</div><div class="lbl">${I18n.t('tp_stat_mom')}</div></div>
+      <div class="stat-card"><div class="val">${s.captain}</div><div class="lbl">${I18n.t('tp_stat_captain')}</div></div>
+      <div class="stat-card"><div class="val">${s.yellow}</div><div class="lbl">${I18n.t('tp_stat_yellow')}</div></div>
+      <div class="stat-card"><div class="val">${s.red}</div><div class="lbl">${I18n.t('tp_stat_red')}</div></div>
+      <div class="stat-card"><div class="val">${s.availabilityPct}%</div><div class="lbl">${I18n.t('tp_stat_availability')}</div></div>
     </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">${I18n.t('tp_card_percentages')}</div>
+        <div class="prog-wrap">
+          <div class="prog-label"><span>${I18n.t('tp_stat_availability')}</span><span>${s.availabilityPct}%</span></div>
+          <div class="prog-bar"><div class="prog-fill" style="width:${s.availabilityPct}%"></div></div>
+        </div>
+        <div class="prog-wrap">
+          <div class="prog-label"><span>${I18n.t('tp_starts_rate')}</span><span>${s.startsPct}%</span></div>
+          <div class="prog-bar"><div class="prog-fill" style="width:${s.startsPct}%"></div></div>
+        </div>
+      </div>
+      ${posEntries.length ? `
+      <div class="card">
+        <div class="card-title">${I18n.t('tp_card_position_breakdown')}</div>
+        ${posEntries.map(([pos,cnt]) => `
+          <div class="prog-wrap">
+            <div class="prog-label"><span>${pos}</span><span>${cnt} ${I18n.t('tp_games_suffix')}</span></div>
+            <div class="prog-bar"><div class="prog-fill" style="width:${Math.round(cnt/s.calledUp*100)||0}%"></div></div>
+          </div>`).join('')}
+      </div>` : '<div></div>'}
+    </div>
+
+    ${last5.length ? `
+    <div class="card">
+      <div class="card-title">${I18n.t('tp_card_recent_form')}</div>
+      <div class="form-strip">
+        ${last5.map(g => {
+          const gp = playerGP.find(r => r.gameId === g.gameId);
+          const gps = allGP.filter(r => r.gameId === g.gameId);
+          const our = Calc.teamGoals(gps);
+          const their = parseInt(g.opponentScore)||0;
+          const res = Calc.result(our, their);
+          const visible = isGameResultVisible(g);
+          if (!visible) return `<div class="form-badge" onclick="openPortalGameViewer(${g.gameId})" style="cursor:pointer"><div class="fb-result badge" style="background:#f0f0f0;color:#999">···</div><div class="fb-stat">${esc(g.opponent.substring(0,8))}</div><div class="fb-stat">${I18n.t('tp_form_upcoming')}</div></div>`;
+          if (!gp||!gp.calledUp) return `<div class="form-badge" onclick="openPortalGameViewer(${g.gameId})" style="cursor:pointer"><div class="fb-result badge badge-${res}">${res}</div><div class="fb-stat">${esc(g.opponent.substring(0,8))}</div><div class="fb-stat">${I18n.t('tp_form_dnp')}</div></div>`;
+          const fbs = Calc.homeAwayScore(g.homeAway, our, their);
+          return `<div class="form-badge" onclick="openPortalGameViewer(${g.gameId})" style="cursor:pointer"><div class="fb-result badge badge-${res}">${res}</div><div class="fb-stat">${fbs.home}-${fbs.away}</div><div class="fb-stat">G:${gp.goals||0} A:${gp.assists||0}</div></div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
   `;
 }
 
@@ -5457,7 +5520,9 @@ async function renderPlayerPortalClubs() {
   if (!el) return;
   const playerId = State.portalPlayerId;
   const player = await DB.get('players', playerId);
-  const all = await DB.getAll('clubHistory', 'playerId', playerId);
+  // clubHistory has no playerId index in IndexedDB — fetch everything and
+  // filter here, same pattern the working guardian Club History tab uses.
+  const all = (await DB.getAll('clubHistory')).filter(c => c.playerId === playerId);
   all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
 
   el.innerHTML = `
@@ -5480,6 +5545,57 @@ async function renderPlayerPortalClubs() {
     </div>`}
   `;
 }
+
+// ── PORTAL — ACHIEVEMENTS (read-only) ────────────────────────────────────────
+async function renderPlayerPortalAchievements() {
+  const el = document.getElementById('pp-sec-achievements');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  // achievements has no playerId index — fetch everything and filter here,
+  // same pattern as the working guardian Achievements tab.
+  const all = (await DB.getAll('achievements')).filter(a => a.playerId === playerId);
+  all.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+  const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('ach_title')}</h1></div></div>
+    ${!all.length ? `<div class="empty"><strong>${I18n.t('ach_empty_title')}</strong></div>` : `
+    <div class="timeline-list">
+      ${all.map(a => `
+        <div class="timeline-item">
+          <div class="ti-title">${a.category==='Trophy'?'&#127942;':a.category==='Award'?'&#127941;':a.category==='Milestone'?'&#127937;':'&#11088;'} ${esc(a.title)}</div>
+          <div class="ti-meta">${catLabel(a.category)} ${a.date?'· '+fmtDate(a.date):''}</div>
+          ${a.description?`<div class="ti-desc">${esc(a.description)}</div>`:''}
+        </div>`).join('')}
+    </div>`}
+  `;
+}
+
+// ── PORTAL — EVENTS (read-only) ──────────────────────────────────────────────
+async function renderPlayerPortalEvents() {
+  const el = document.getElementById('pp-sec-events');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  // events DOES have a playerId index, so this lookup is correct as-is.
+  const all = (await DB.getAll('events','playerId',playerId)) || [];
+  all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
+  const evTypeLabel = t => ({Tournament:I18n.t('evtype_tournament'),Trial:I18n.t('evtype_trial'),Camp:I18n.t('evtype_camp'),Medical:I18n.t('evtype_medical'),Award:I18n.t('evtype_award'),Trip:I18n.t('evtype_trip'),Other:I18n.t('evtype_other')}[t] || t || '');
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('ev_title')}</h1></div></div>
+    ${!all.length ? `<div class="empty"><strong>${I18n.t('ev_empty_title')}</strong></div>` : `
+    <div class="timeline-list">
+      ${all.map(e => `
+        <div class="timeline-item">
+          <div class="ti-title">${EVENT_TYPE_ICONS[e.eventType]||'&#128197;'} ${esc(e.title)}</div>
+          <div class="ti-meta">${evTypeLabel(e.eventType)} ${e.startDate?'· '+fmtDate(e.startDate):''}${e.endDate?' → '+fmtDate(e.endDate):''}${e.location?' · '+esc(e.location):''}</div>
+          ${e.outcome?`<div class="ti-meta" style="font-weight:700;color:var(--dark)">${I18n.t('ev_outcome_prefix')} ${esc(e.outcome)}</div>`:''}
+          ${e.description?`<div class="ti-desc">${esc(e.description)}</div>`:''}
+        </div>`).join('')}
+    </div>`}
+  `;
+}
+
 
 
 async function renderPlayerEvents(playerId) {
@@ -7097,6 +7213,8 @@ const Nav = (() => {
       training:  { icon: '&#9917;',  key: 'pp_nav_training' },
       games:     { icon: '&#127944;', key: 'pp_nav_games' },
       clubs:     { icon: '&#127942;', key: 'pp_nav_clubs' },
+      achievements: { icon: '&#127941;', key: 'pp_nav_achievements' },
+      events:    { icon: '&#128197;', key: 'pp_nav_events' },
     };
     const nameEl = document.getElementById('playerPortalPageName');
     if (nameEl && pageMeta[section]) {
@@ -7111,6 +7229,8 @@ const Nav = (() => {
       if (section === 'training')  { gdDebugLog('calling renderPlayerTrainingShell()'); await renderPlayerTrainingShell(State.portalPlayerId); gdDebugLog('renderPlayerTrainingShell() finished OK'); }
       if (section === 'games')     { gdDebugLog('calling renderPlayerPortalGames()'); await renderPlayerPortalGames(); gdDebugLog('renderPlayerPortalGames() finished OK'); }
       if (section === 'clubs')     { gdDebugLog('calling renderPlayerPortalClubs()'); await renderPlayerPortalClubs(); gdDebugLog('renderPlayerPortalClubs() finished OK'); }
+      if (section === 'achievements') { gdDebugLog('calling renderPlayerPortalAchievements()'); await renderPlayerPortalAchievements(); gdDebugLog('renderPlayerPortalAchievements() finished OK'); }
+      if (section === 'events')    { gdDebugLog('calling renderPlayerPortalEvents()'); await renderPlayerPortalEvents(); gdDebugLog('renderPlayerPortalEvents() finished OK'); }
       gdDebugLog(`target.innerHTML.length after render = ${target.innerHTML.length}`);
     } catch(err) {
       // Show the real error directly on the page instead of leaving it
@@ -9027,6 +9147,8 @@ async function init() {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('playerPortal').style.display = 'flex';
         document.getElementById('playerPortalName').textContent = shortName(portalPlayer.fullName);
+        const portalInfoEl2 = document.getElementById('portalMobileAccountInfo');
+        if (portalInfoEl2) portalInfoEl2.textContent = I18n.t('acc_logged_in_as') + ': ' + shortName(portalPlayer.fullName);
         setupPlayerPortalNav();
         let restoredPortalSection = 'home';
         try {
