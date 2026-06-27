@@ -7061,8 +7061,6 @@ const Nav = (() => {
   // go(), so there is no shared code path that could accidentally expose a
   // guardian-only section to the portal.
   async function goPortal(section) {
-    _debugModeCache = true; // force the debug panel on for the portal right now — no toggle needed
-    ensureDebugPanel();
     gdDebugLog(`goPortal('${section}') called`);
 
     const allSections = document.querySelectorAll('#playerPortal .section');
@@ -7072,7 +7070,14 @@ const Nav = (() => {
     const target = document.getElementById(`pp-sec-${section}`);
     gdDebugLog(`target element pp-sec-${section} exists: ${!!target}`);
     if (!target) { gdDebugLog(`ABORT — no element with id pp-sec-${section} found in the DOM`); return; }
-    target.style.display = '';
+    // IMPORTANT: must be an explicit 'block', not '' — the base .section CSS
+    // rule is display:none, and these elements never carry the .active class
+    // that the guardian app's sections use to override that. Clearing the
+    // inline style here was falling straight back to that none rule, which
+    // is the actual reason every page but Home appeared blank: the content
+    // was rendering correctly the whole time, just sitting inside an element
+    // the stylesheet was still hiding.
+    target.style.display = 'block';
 
     document.querySelectorAll('#portalMobileMenu .nav-link[data-portal-section]').forEach(l => {
       l.classList.toggle('active', l.dataset.portalSection === section);
