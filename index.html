@@ -39,8 +39,9 @@ a{color:#111;text-decoration:none}
 .main-content{margin-top:var(--nav-h);padding:20px;max-width:1200px;width:100%;margin-left:auto;margin-right:auto;flex:1}
 
 /* ── NAV ──────────────────────────────────────────────────────────────────── */
-nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--navy);z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
-.nav-brand{display:flex;align-items:center;gap:8px;white-space:nowrap}
+nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);background:var(--navy);z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 16px;max-width:100vw;overflow:hidden}
+.nav-brand{display:flex;align-items:center;gap:8px;white-space:nowrap;min-width:0;overflow:hidden;flex:1}
+.nav-wordmark,.nav-season{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .nav-logo-mark{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,#0F1E2E,#1a2f45);border:1.5px solid #B23333;display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}
 .nav-logo-mark span{color:#fff;font-weight:800;font-size:12px;font-style:italic;line-height:1}
 .nav-wordmark{font-size:15px;font-weight:800;letter-spacing:.2px;color:#fff}
@@ -442,7 +443,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
      and only Training has any write capability at all (see Pass 1/2 rules).
      ══════════════════════════════════════════════════════════════════════════ -->
 <div id="playerPortal" style="display:none;min-height:100vh;flex-direction:column;background:var(--bg)">
-  <nav style="position:static">
+  <nav>
     <div class="nav-brand">
       <div class="nav-logo-mark"><span>11</span></div>
       <div class="nav-wordmark" id="playerPortalPageName">Next<b>Eleven</b></div>
@@ -454,12 +455,14 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
   </nav>
   <div class="mobile-menu" id="portalMobileMenu">
     <button class="nav-link" data-portal-section="home" onclick="Nav.goPortal('home');document.getElementById('portalMobileMenu').classList.remove('open')">&#127968; <span data-i18n="pp_nav_home">Home</span></button>
-    <button class="nav-link" data-portal-section="dashboard" onclick="Nav.goPortal('dashboard');document.getElementById('portalMobileMenu').classList.remove('open')">&#128202; <span data-i18n="pp_nav_dashboard">Dashboard</span></button>
+    <button class="nav-link" data-portal-section="dashboard" onclick="Nav.goPortal('dashboard');document.getElementById('portalMobileMenu').classList.remove('open')">&#128202; <span data-i18n="pp_nav_dashboard">Overview</span></button>
+    <button class="nav-link" data-portal-section="stats" onclick="Nav.goPortal('stats');document.getElementById('portalMobileMenu').classList.remove('open')">&#9889; <span data-i18n="pp_nav_stats">Stats</span></button>
     <button class="nav-link" data-portal-section="training" onclick="Nav.goPortal('training');document.getElementById('portalMobileMenu').classList.remove('open')">&#9917; <span data-i18n="pp_nav_training">Training</span></button>
     <button class="nav-link" data-portal-section="games" onclick="Nav.goPortal('games');document.getElementById('portalMobileMenu').classList.remove('open')">&#127944; <span data-i18n="pp_nav_games">Games</span></button>
     <button class="nav-link" data-portal-section="clubs" onclick="Nav.goPortal('clubs');document.getElementById('portalMobileMenu').classList.remove('open')">&#127942; <span data-i18n="pp_nav_clubs">Club History</span></button>
     <button class="nav-link" data-portal-section="achievements" onclick="Nav.goPortal('achievements');document.getElementById('portalMobileMenu').classList.remove('open')">&#127941; <span data-i18n="pp_nav_achievements">Achievements</span></button>
     <button class="nav-link" data-portal-section="events" onclick="Nav.goPortal('events');document.getElementById('portalMobileMenu').classList.remove('open')">&#128197; <span data-i18n="pp_nav_events">Events</span></button>
+    <button class="nav-link" data-portal-section="teamsummary" onclick="Nav.goPortal('teamsummary');document.getElementById('portalMobileMenu').classList.remove('open')">&#128202; <span data-i18n="pp_nav_teamsummary">Team Summary</span></button>
     <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:6px">
       <div id="portalMobileAccountInfo" style="padding:8px 12px;font-size:11px;color:#9aa5b1"></div>
       <button class="nav-link" onclick="handlePlayerPortalExit()">&#128274; <span data-i18n="acc_btn_logout">Log Out</span></button>
@@ -468,11 +471,13 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
   <div class="main-content">
     <div class="section active" id="pp-sec-home"></div>
     <div class="section" id="pp-sec-dashboard" style="display:none"></div>
+    <div class="section" id="pp-sec-stats" style="display:none"></div>
     <div class="section" id="pp-sec-training" style="display:none"></div>
     <div class="section" id="pp-sec-games" style="display:none"></div>
     <div class="section" id="pp-sec-clubs" style="display:none"></div>
     <div class="section" id="pp-sec-achievements" style="display:none"></div>
     <div class="section" id="pp-sec-events" style="display:none"></div>
+    <div class="section" id="pp-sec-teamsummary" style="display:none"></div>
   </div>
 </div>
 
@@ -2010,6 +2015,38 @@ const TR = {
     tr_progress_sessions_suffix:'sessions',
     tr_progress_empty:'Complete a session to start tracking progress.',
 
+    // ── DRILL LIBRARY — UI LABELS ──
+    tr_drill_library_group:'Drill Library', tr_drill_generic_group:'Generic (legacy)',
+    tr_drill_objective:'Objective', tr_drill_instructions:'Instructions',
+    tr_drill_coaching_points:'Coaching Points', tr_drill_progression:'Progression',
+    tr_drill_meta_line:'{duration} min · {difficulty} · {equipment}',
+
+    // ── DRILL LIBRARY — DRILL NAMES ──
+    drilllib_wallPassing100:'Wall Passing 100',
+    drilllib_firstTouchWallControl:'First Touch Wall Control',
+    drilllib_twoTouchWallPassing:'Two Touch Wall Passing',
+    drilllib_oneTouchWallPassing:'One Touch Wall Passing',
+    drilllib_weakFootWallPasses:'Weak Foot Wall Passes',
+    drilllib_coneSlalomDribble:'Cone Slalom Dribble',
+    drilllib_figure8Dribbling:'Figure 8 Dribbling',
+    drilllib_insideOutsideTouches:'Inside Outside Touches',
+    drilllib_soleRolls:'Sole Rolls',
+    drilllib_vPulls:'V Pulls',
+    drilllib_croquetaMaster:'Croqueta Master',
+    drilllib_insideOutsideMove:'Inside Outside (In-Out)',
+    drilllib_sambaRoll:'Samba Roll',
+    drilllib_cruyffTurn:'Cruyff Turn',
+    drilllib_jugglingChallenge:'Juggling Challenge',
+    drilllib_sprintWithBall:'Sprint With Ball',
+    drilllib_zigZagSprint:'Zig Zag Sprint',
+    drilllib_reactionSprint:'Reaction Sprint',
+    drilllib_targetShooting:'Target Shooting',
+    drilllib_dribbleAndFinish:'Dribble and Finish',
+    drilllib_firstTouchAndShoot:'First Touch and Shoot',
+    drilllib_weakFootFinishing:'Weak Foot Finishing',
+    drilllib_soloFitnessWithBall:'Solo Fitness With Ball',
+    drilllib_oneMinuteSkillChallenge:'1 Minute Skill Challenge',
+
     // ── PLAYER PORTAL ──
     pp_nav_home:'Home', pp_nav_training:'Training', pp_nav_stats:'My Stats',
     pp_home_title:'My Home',
@@ -2041,8 +2078,8 @@ const TR = {
     acc_pin_removed:'PIN removed — player can no longer log into their portal until a new one is set.',
 
     // ── PLAYER PORTAL — EXPANDED NAV ──
-    pp_nav_dashboard:'Dashboard', pp_nav_games:'Games', pp_nav_clubs:'Club History',
-    pp_nav_achievements:'Achievements', pp_nav_events:'Events',
+    pp_nav_dashboard:'Overview', pp_nav_stats:'Stats', pp_nav_games:'Games', pp_nav_clubs:'Club History',
+    pp_nav_achievements:'Achievements', pp_nav_events:'Events', pp_nav_teamsummary:'Team Summary',
     pp_training_tab_new:'New Session', pp_training_tab_history:'History',
     pp_assist_by:'Assist by',
     pp_not_called_up_section:'Not called up',
@@ -2796,6 +2833,38 @@ const TR = {
     tr_progress_sessions_suffix:'sessões',
     tr_progress_empty:'Conclua uma sessão para começar a acompanhar o progresso.',
 
+    // ── DRILL LIBRARY — UI LABELS ──
+    tr_drill_library_group:'Biblioteca de Exercícios', tr_drill_generic_group:'Genérico (antigo)',
+    tr_drill_objective:'Objetivo', tr_drill_instructions:'Instruções',
+    tr_drill_coaching_points:'Pontos-Chave', tr_drill_progression:'Progressão',
+    tr_drill_meta_line:'{duration} min · {difficulty} · {equipment}',
+
+    // ── DRILL LIBRARY — DRILL NAMES ──
+    drilllib_wallPassing100:'100 Passes à Parede',
+    drilllib_firstTouchWallControl:'Controlo de Primeiro Toque à Parede',
+    drilllib_twoTouchWallPassing:'Passe a Dois Toques na Parede',
+    drilllib_oneTouchWallPassing:'Passe a Um Toque na Parede',
+    drilllib_weakFootWallPasses:'Passes à Parede com o Pé Não-Dominante',
+    drilllib_coneSlalomDribble:'Slalom de Cones com Condução',
+    drilllib_figure8Dribbling:'Condução em Oito',
+    drilllib_insideOutsideTouches:'Toques Interior-Exterior',
+    drilllib_soleRolls:'Rolamentos com a Sola',
+    drilllib_vPulls:'Puxadas em V',
+    drilllib_croquetaMaster:'Mestre da Croqueta',
+    drilllib_insideOutsideMove:'Movimento Interior-Exterior',
+    drilllib_sambaRoll:'Rolamento Samba',
+    drilllib_cruyffTurn:'Volta de Cruyff',
+    drilllib_jugglingChallenge:'Desafio de Embaixadinhas',
+    drilllib_sprintWithBall:'Sprint com Bola',
+    drilllib_zigZagSprint:'Sprint em Zigzag',
+    drilllib_reactionSprint:'Sprint de Reação',
+    drilllib_targetShooting:'Remate a Alvos',
+    drilllib_dribbleAndFinish:'Condução e Finalização',
+    drilllib_firstTouchAndShoot:'Primeiro Toque e Remate',
+    drilllib_weakFootFinishing:'Finalização com o Pé Não-Dominante',
+    drilllib_soloFitnessWithBall:'Condição Física Individual com Bola',
+    drilllib_oneMinuteSkillChallenge:'Desafio de Técnica de 1 Minuto',
+
     // ── PLAYER PORTAL ──
     pp_nav_home:'Início', pp_nav_training:'Treino', pp_nav_stats:'As Minhas Estatísticas',
     pp_home_title:'O Meu Início',
@@ -2827,8 +2896,8 @@ const TR = {
     acc_pin_removed:'PIN removido — o jogador deixa de poder iniciar sessão no portal até ser definido um novo.',
 
     // ── PLAYER PORTAL — EXPANDED NAV ──
-    pp_nav_dashboard:'Dashboard', pp_nav_games:'Jogos', pp_nav_clubs:'Histórico de Clubes',
-    pp_nav_achievements:'Conquistas', pp_nav_events:'Eventos',
+    pp_nav_dashboard:'Resumo', pp_nav_stats:'Estatísticas', pp_nav_games:'Jogos', pp_nav_clubs:'Histórico de Clubes',
+    pp_nav_achievements:'Conquistas', pp_nav_events:'Eventos', pp_nav_teamsummary:'Resumo da Equipa',
     pp_training_tab_new:'Nova Sessão', pp_training_tab_history:'Histórico',
     pp_assist_by:'Assistência de',
     pp_not_called_up_section:'Não convocados',
@@ -4274,6 +4343,171 @@ function drillFieldLabel(drillKey, fieldKey) {
   return f ? I18n.t(f.i18nKey) : fieldKey;
 }
 
+// ── DRILL LIBRARY ─────────────────────────────────────────────────────────────
+// A reference catalogue of named, structured drills — distinct from the
+// generic DRILL_TYPES above (kept untouched so any session already using
+// the old generic categories keeps working exactly as before). Each library
+// drill carries its own full description (category, duration, difficulty,
+// equipment, objective, instructions, coaching points, progression) plus a
+// small set of score fields derived from its own scoring method — these
+// vary per drill (some track time, some track counts, some track accuracy),
+// which is why each drill defines its own fields rather than sharing one
+// fixed shape.
+const DRILL_LIBRARY = [
+  { key:'wallPassing100', category:'Passing', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Wall',
+    objective:'Improve passing accuracy and first touch with both feet.',
+    instructions:'Pass 25 times with the right foot, 25 with the left foot, then alternate until reaching 100 passes. Stand 3 to 5 metres from the wall.',
+    coachingPoints:'Head up, lock the ankle, use the inside of the foot, control into space.',
+    progression:'Two-touch only, then one-touch, increase distance.',
+    scoreFields:[{key:'totalPasses',label:'Total Passes'},{key:'mistakes',label:'Mistakes'},{key:'longestStreak',label:'Longest Streak'}] },
+  { key:'firstTouchWallControl', category:'First Touch', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Wall',
+    objective:'Improve first touch and control.',
+    instructions:'Pass against the wall, control with the first touch, repeat continuously.',
+    coachingPoints:'Cushion the ball, open body, scan before receiving.',
+    progression:'Use weaker foot, then one-touch return.',
+    scoreFields:[{key:'successfulControls',label:'Successful Controls'},{key:'mistakes',label:'Mistakes'}] },
+  { key:'twoTouchWallPassing', category:'Passing', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball, Wall',
+    objective:'Develop passing rhythm.',
+    instructions:'Control with first touch, pass with second touch for the full session.',
+    coachingPoints:'Soft first touch, accurate pass.',
+    progression:'Faster tempo, weaker foot only.',
+    scoreFields:[{key:'passesCompleted',label:'Passes Completed'},{key:'accuracyPct',label:'Accuracy (%)'}] },
+  { key:'oneTouchWallPassing', category:'Passing', type:'Solo', durationMin:8, difficulty:'Medium', equipment:'Ball, Wall',
+    objective:'Improve quick passing.',
+    instructions:'Return every ball first time without controlling it.',
+    coachingPoints:'Stay light on your feet, accuracy before power.',
+    progression:'Increase speed or distance.',
+    scoreFields:[{key:'longestStreak',label:'Longest Streak'},{key:'mistakes',label:'Mistakes'}] },
+  { key:'weakFootWallPasses', category:'Passing', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Wall',
+    objective:'Build confidence with the weaker foot.',
+    instructions:'Complete all passes using only the weaker foot.',
+    coachingPoints:'Good balance, follow through.',
+    progression:'One-touch only.',
+    scoreFields:[{key:'accuratePasses',label:'Accurate Passes Completed'}] },
+  { key:'coneSlalomDribble', category:'Dribbling', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, 6 Cones',
+    objective:'Improve close ball control.',
+    instructions:'Dribble through six cones without touching them. Repeat continuously.',
+    coachingPoints:'Small touches, head up, use both feet.',
+    progression:'Narrow cone spacing, increase speed.',
+    scoreFields:[{key:'bestTimeSec',label:'Best Time (sec)'},{key:'coneTouches',label:'Cone Touches'}] },
+  { key:'figure8Dribbling', category:'Dribbling', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, 2 Cones',
+    objective:'Improve turning and close control.',
+    instructions:'Dribble continuously in a figure 8 around two cones.',
+    coachingPoints:'Stay balanced, use both feet.',
+    progression:'Reduce cone distance.',
+    scoreFields:[{key:'lapsCompleted',label:'Laps Completed'}] },
+  { key:'insideOutsideTouches', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball',
+    objective:'Improve coordination.',
+    instructions:'Alternate inside and outside touches while moving forward.',
+    coachingPoints:'Keep the ball close, quick feet.',
+    progression:'Faster tempo, weaker foot only.',
+    scoreFields:[{key:'touchesPerMin',label:'Touches in One Minute'}] },
+  { key:'soleRolls', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball',
+    objective:'Improve balance and control.',
+    instructions:'Roll the ball from side to side using the sole of each foot.',
+    coachingPoints:'Bend knees, stay light.',
+    progression:'Add forward movement.',
+    scoreFields:[{key:'rollsCompleted',label:'Rolls Completed'}] },
+  { key:'vPulls', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Medium', equipment:'Ball',
+    objective:'Improve turns and ball manipulation.',
+    instructions:'Pull the ball back with the sole, push it forward diagonally to form a V shape.',
+    coachingPoints:'Keep movements sharp and controlled.',
+    progression:'Alternate feet.',
+    scoreFields:[{key:'repsCompleted',label:'Repetitions Completed'}] },
+  { key:'croquetaMaster', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, 2 Cones',
+    objective:'Learn to escape pressure using the Croqueta.',
+    instructions:'Dribble to a cone, perform the Croqueta, accelerate for 5 metres. Repeat.',
+    coachingPoints:'Shift weight quickly, accelerate immediately.',
+    progression:'Add a second cone defender.',
+    scoreFields:[{key:'repsCompleted',label:'Successful Repetitions'}] },
+  { key:'insideOutsideMove', category:'Skills', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Cones',
+    objective:'Master the In-Out move.',
+    instructions:'Push the ball with the inside then immediately with the outside of the same foot around a cone.',
+    coachingPoints:'Quick touch, explosive exit.',
+    progression:'Alternate feet.',
+    scoreFields:[{key:'repsCompleted',label:'Successful Repetitions'}] },
+  { key:'sambaRoll', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball',
+    objective:'Improve coordination and close control.',
+    instructions:'Roll the ball across your body with the sole and accelerate away.',
+    coachingPoints:'Stay balanced, keep the ball close.',
+    progression:'Perform while moving.',
+    scoreFields:[{key:'consecutiveRolls',label:'Consecutive Successful Rolls'}] },
+  { key:'cruyffTurn', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Cone',
+    objective:'Master the Cruyff Turn.',
+    instructions:'Fake a pass or shot, pull the ball behind the standing leg and change direction.',
+    coachingPoints:'Sell the fake, accelerate away.',
+    progression:'Add a finish after the turn.',
+    scoreFields:[{key:'successfulTurns',label:'Successful Turns'}] },
+  { key:'jugglingChallenge', category:'Ball Mastery', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball',
+    objective:'Improve touch and coordination.',
+    instructions:'Keep the ball in the air as long as possible using both feet.',
+    coachingPoints:'Relax, soft touches, use both feet.',
+    progression:'Weaker foot only.',
+    scoreFields:[{key:'highestCount',label:'Highest Juggle Count'}] },
+  { key:'sprintWithBall', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Cones',
+    objective:'Improve acceleration while dribbling.',
+    instructions:'Sprint 20 metres with the ball and repeat after recovery.',
+    coachingPoints:'Push the ball into space, head up.',
+    progression:'Add direction changes.',
+    scoreFields:[{key:'bestSprintTimeSec',label:'Best Sprint Time (sec)'}] },
+  { key:'zigZagSprint', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'6 Cones',
+    objective:'Improve agility and speed.',
+    instructions:'Sprint through cones in a zig-zag pattern.',
+    coachingPoints:'Stay low during direction changes.',
+    progression:'Perform with the ball.',
+    scoreFields:[{key:'fastestTimeSec',label:'Fastest Time (sec)'}] },
+  { key:'reactionSprint', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Cones',
+    objective:'Improve reaction speed.',
+    instructions:'Start facing away from the cones. On a signal, sprint to the designated cone.',
+    coachingPoints:'Explosive first step.',
+    progression:'Add a ball after the sprint.',
+    scoreFields:[{key:'reactionTimeSec',label:'Reaction Time (sec)'}] },
+  { key:'targetShooting', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Goal, Targets',
+    objective:'Improve shooting accuracy.',
+    instructions:'Aim for different target zones in the goal.',
+    coachingPoints:'Accuracy before power, proper body position.',
+    progression:'Smaller targets, weaker foot.',
+    scoreFields:[{key:'targetHits',label:'Target Hits'},{key:'goalsScored',label:'Goals Scored'}] },
+  { key:'dribbleAndFinish', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Cones, Goal',
+    objective:'Finish after beating a defender.',
+    instructions:'Complete a slalom through cones before shooting.',
+    coachingPoints:'Positive first touch, keep composure.',
+    progression:'Weaker foot finish.',
+    scoreFields:[{key:'goalsScored',label:'Goals Scored'},{key:'shootingAccuracyPct',label:'Shooting Accuracy (%)'}] },
+  { key:'firstTouchAndShoot', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Hard', equipment:'Ball, Wall, Goal',
+    objective:'Shoot quickly after controlling the ball.',
+    instructions:'Pass against the wall, control the return and shoot immediately.',
+    coachingPoints:'First touch into shooting path.',
+    progression:'One-touch finish.',
+    scoreFields:[{key:'goalsScored',label:'Goals Scored'},{key:'shotsOnTarget',label:'Shots on Target'}] },
+  { key:'weakFootFinishing', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Hard', equipment:'Ball, Goal',
+    objective:'Improve finishing with the weaker foot.',
+    instructions:'Shoot from different angles using only the weaker foot.',
+    coachingPoints:'Technique before power.',
+    progression:'One-touch finishes.',
+    scoreFields:[{key:'goalsScored',label:'Goals Scored'}] },
+  { key:'soloFitnessWithBall', category:'Fitness', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Cones',
+    objective:'Build football fitness while keeping the ball.',
+    instructions:'Complete shuttle runs, dribbling, turns and sprints continuously.',
+    coachingPoints:'Maintain technique while fatigued.',
+    progression:'Reduce recovery time.',
+    scoreFields:[{key:'timeCompletedMin',label:'Time Completed (min)'},{key:'distanceCoveredKm',label:'Distance Covered (km)'}] },
+  { key:'oneMinuteSkillChallenge', category:'Challenge', type:'Solo', durationMin:5, difficulty:'Easy', equipment:'Ball',
+    objective:'Improve speed and technique under pressure.',
+    instructions:'Perform as many quality touches or skill moves as possible in one minute.',
+    coachingPoints:'Stay relaxed, minimise mistakes.',
+    progression:'Increase target each week.',
+    scoreFields:[{key:'totalCompleted',label:'Total Touches or Moves Completed'}] },
+];
+
+function getLibraryDrill(key) {
+  return DRILL_LIBRARY.find(d => d.key === key) || null;
+}
+
+function libDrillDisplayName(key) {
+  return I18n.t('drilllib_' + key);
+}
+
 const EXT_STAT_FIELDS = [
   { section: 'Shooting', sectionKey: 'ext_sec_shooting', fields: [
     { key: 'shotsOnTarget',  label: 'Shots on Target',  i18nKey: 'ext_shotsOnTarget' },
@@ -5095,28 +5329,71 @@ function updateTrainingDrillField(index, fieldKey, value, isText) {
 function renderTrainingDrillRows(playerId) {
   const el = document.getElementById(`trainingDrillRows-${playerId}`);
   if (!el) return;
+
+  // Group library drills by category for a cleaner dropdown.
+  const categories = [...new Set(DRILL_LIBRARY.map(d => d.category))];
+
   el.innerHTML = _trainingFormDrills.map((drill, i) => {
-    const def = DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0];
+    const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
+    const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
+    const scoreFields = libDrill ? libDrill.scoreFields : (def ? def.fields : []);
+
     return `
       <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <select style="flex:1" onchange="updateTrainingDrillType(${playerId},${i},this.value)">
-            ${DRILL_TYPES.map(d => `<option value="${d.key}" ${d.key===drill.drillType?'selected':''}>${drillTypeLabel(d.key)}</option>`).join('')}
+          <select style="flex:1" onchange="updateTrainingDrillSelection(${playerId},${i},this.value)">
+            <optgroup label="${I18n.t('tr_drill_library_group')}">
+              ${categories.map(cat => DRILL_LIBRARY.filter(d=>d.category===cat).map(d =>
+                `<option value="lib:${d.key}" ${libDrill?.key===d.key?'selected':''}>${esc(libDrillDisplayName(d.key))} (${esc(cat)})</option>`
+              ).join('')).join('')}
+            </optgroup>
+            <optgroup label="${I18n.t('tr_drill_generic_group')}">
+              ${DRILL_TYPES.map(d => `<option value="gen:${d.key}" ${!libDrill && d.key===drill.drillType?'selected':''}>${drillTypeLabel(d.key)}</option>`).join('')}
+            </optgroup>
           </select>
           <button type="button" class="btn btn-danger btn-sm" onclick="removeTrainingDrillRow(${playerId},${i})">${I18n.t('tr_btn_remove_drill')}</button>
         </div>
+
+        ${libDrill ? `
+        <div style="background:#f8f8f8;border-radius:4px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--dark)">
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_objective')}:</strong> ${esc(libDrill.objective)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_instructions')}:</strong> ${esc(libDrill.instructions)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_coaching_points')}:</strong> ${esc(libDrill.coachingPoints)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_progression')}:</strong> ${esc(libDrill.progression)}</div>
+          <div style="color:var(--muted)">${I18n.t('tr_drill_meta_line', {duration: libDrill.durationMin, difficulty: libDrill.difficulty, equipment: libDrill.equipment})}</div>
+        </div>` : ''}
+
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
-          ${def.fields.map(f => `
+          ${scoreFields.map(f => {
+            const fieldKey = f.key;
+            const fieldLabel = libDrill ? f.label : drillFieldLabel(def.key, f.key);
+            const isText = !libDrill && f.isText;
+            return `
             <div>
-              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${drillFieldLabel(def.key, f.key)}</label>
-              ${f.isText
-                ? `<input type="text" value="${esc(drill[f.key]||'')}" oninput="updateTrainingDrillField(${i},'${f.key}',this.value,true)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">`
-                : `<input type="number" min="0" value="${drill[f.key]||0}" oninput="updateTrainingDrillField(${i},'${f.key}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">`}
-            </div>`).join('')}
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
+              ${isText
+                ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">`
+                : `<input type="number" min="0" value="${drill[fieldKey]||0}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">`}
+            </div>`;
+          }).join('')}
         </div>
       </div>`;
   }).join('') || `<p style="font-size:12px;color:var(--muted)">—</p>`;
 }
+
+// "lib:wallPassing100" or "gen:juggling" — encodes which list the selection
+// came from, since library and generic drills have different shapes.
+function updateTrainingDrillSelection(playerId, index, value) {
+  const [kind, key] = value.split(':');
+  if (kind === 'lib') {
+    _trainingFormDrills[index] = { libraryKey: key, drillType: null };
+  } else {
+    _trainingFormDrills[index] = { drillType: key, libraryKey: null };
+  }
+  renderTrainingDrillRows(playerId);
+}
+
+
 
 async function saveTrainingFormSession() {
   const title = document.getElementById('tr-title')?.value.trim();
@@ -5596,7 +5873,139 @@ async function renderPlayerPortalEvents() {
   `;
 }
 
+// ── PORTAL — TEAM SUMMARY (read-only) ────────────────────────────────────────
+// Mirrors the guardian's Team Summary: season record, most-used lineup, top
+// scorers/assisters/appearances/MoM leader cards. Deliberately leaves out
+// the squad-wide injury report the guardian sees — that's other children's
+// medical information, not something appropriate to surface in a portal a
+// child can access themselves.
+async function renderPlayerPortalTeamSummary() {
+  const el = document.getElementById('pp-sec-teamsummary');
+  if (!el) return;
 
+  const [games, players, allGP] = await Promise.all([
+    DB.getAll('games','seasonId',State.currentSeasonId),
+    DB.getAll('players','seasonId',State.currentSeasonId),
+    DB.getAll('gamePlayers','seasonId',State.currentSeasonId)
+  ]);
+
+  if (!games.length) {
+    el.innerHTML = `<div class="page-header"><div><h1>${I18n.t('nav_teamSummary')}</h1></div></div><div class="empty"><strong>${I18n.t('ts_no_games_title')}</strong><p>${I18n.t('ts_no_games_desc')}</p></div>`;
+    return;
+  }
+
+  const finishedGames = games.filter(g => isGameResultVisible(g));
+  const ts = Calc.teamSeasonStats(finishedGames, allGP);
+
+  const pStats = players.filter(p=>p.isActive).map(p => ({
+    ...p, ...Calc.playerSeasonStats(p.playerId, finishedGames, allGP)
+  }));
+  const topScorers = [...pStats].sort((a,b)=>b.goals-a.goals).slice(0,5);
+  const topAssisters = [...pStats].sort((a,b)=>b.assists-a.assists).slice(0,5);
+  const mostApps = [...pStats].filter(p=>p.calledUp>0).sort((a,b)=>b.calledUp-a.calledUp).slice(0,5);
+  const mostMoM = [...pStats].sort((a,b)=>b.mom-a.mom).filter(p=>p.mom>0).slice(0,5);
+
+  const mostUsedLineup = buildMostUsedLineup(players, finishedGames, allGP);
+  const shirtColor = State.currentSeason?.shirtColor || '#B23333';
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('nav_teamSummary')}</h1></div></div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="val">${ts.played}</div><div class="lbl">${I18n.t('ts_played')}</div></div>
+      <div class="stat-card"><div class="val">${ts.wins}</div><div class="lbl">${I18n.t('ts_wins')}</div></div>
+      <div class="stat-card"><div class="val">${ts.draws}</div><div class="lbl">${I18n.t('ts_draws')}</div></div>
+      <div class="stat-card"><div class="val">${ts.losses}</div><div class="lbl">${I18n.t('ts_losses')}</div></div>
+      <div class="stat-card"><div class="val">${ts.goalsFor}</div><div class="lbl">${I18n.t('ts_goals_for')}</div></div>
+      <div class="stat-card"><div class="val">${ts.goalsAgainst}</div><div class="lbl">${I18n.t('ts_goals_against')}</div></div>
+      <div class="stat-card"><div class="val">${ts.goalDiff>0?'+':''}${ts.goalDiff}</div><div class="lbl">${I18n.t('ts_goal_diff')}</div></div>
+      <div class="stat-card"><div class="val">${ts.cleanSheets}</div><div class="lbl">${I18n.t('ts_clean_sheets')}</div></div>
+    </div>
+
+    ${renderLineupPitch(mostUsedLineup, shirtColor)}
+
+    <div class="card">
+      <div class="card-title">${I18n.t('ts_records')}</div>
+      <div class="info-row"><span class="ir-label">${I18n.t('ts_home')}</span><span class="ir-value">${ts.homeW}W ${ts.homeD}D ${ts.homeL}L</span></div>
+      <div class="info-row"><span class="ir-label">${I18n.t('ts_away')}</span><span class="ir-value">${ts.awayW}W ${ts.awayD}D ${ts.awayL}L</span></div>
+      <div class="info-row"><span class="ir-label">${I18n.t('ts_best_win_streak')}</span><span class="ir-value">${ts.bestStreak} ${I18n.t('ts_games_suffix')}</span></div>
+      <div class="info-row"><span class="ir-label">${I18n.t('ts_best_unbeaten')}</span><span class="ir-value">${ts.bestUnbeaten} ${I18n.t('ts_games_suffix')}</span></div>
+      ${ts.biggestWin?`<div class="info-row"><span class="ir-label">${I18n.t('ts_biggest_win')}</span><span class="ir-value">${ts.biggestWin.score} ${I18n.t('ts_vs')} ${esc(ts.biggestWin.opp)}</span></div>`:''}
+      ${ts.biggestLoss?`<div class="info-row"><span class="ir-label">${I18n.t('ts_biggest_loss')}</span><span class="ir-value">${ts.biggestLoss.score} ${I18n.t('ts_vs')} ${esc(ts.biggestLoss.opp)}</span></div>`:''}
+    </div>
+
+    <div class="leader-grid">
+      ${leaderCard(I18n.t('ts_top_scorers'), topScorers, 'goals', I18n.t('ts_stat_goals'))}
+      ${leaderCard(I18n.t('ts_top_assisters'), topAssisters, 'assists', I18n.t('ts_stat_assists'))}
+    </div>
+    <div class="leader-grid">
+      ${leaderCard(I18n.t('ts_most_used'), mostApps, 'calledUp', I18n.t('ts_stat_apps'))}
+      ${mostMoM.length ? leaderCard(I18n.t('ts_player_of_match'), mostMoM, 'mom', I18n.t('ts_stat_mom')) : '<div></div>'}
+    </div>
+  `;
+}
+
+// ── PORTAL — STATS (read-only Extended Stats: season totals + accuracy) ─────
+// Same underlying data as the guardian's Stats tab, but with the per-game
+// entry form removed entirely — that's an editing tool, not something a
+// player needs or should have write access to from their own portal.
+async function renderPlayerPortalExtendedStats() {
+  const el = document.getElementById('pp-sec-stats');
+  if (!el) return;
+  const playerId = State.portalPlayerId;
+  const player = await DB.get('players', playerId);
+  if (!player) return;
+
+  await getFieldVisibility();
+  const allPGS = await DB.getAll('playerGameStats','playerId',playerId);
+
+  const totals = {};
+  EXT_STAT_FIELDS.forEach(s => s.fields.forEach(f => {
+    totals[f.key] = allPGS.reduce((sum,r) => sum+(parseInt(r[f.key])||0), 0);
+  }));
+
+  const visibleSections = EXT_STAT_FIELDS
+    .map(section => ({ ...section, fields: section.fields.filter(f => isFieldVisible(f.key)) }))
+    .filter(section => section.fields.length > 0);
+
+  const pct = (a,b) => b>0 ? Math.round(a/b*100) : '—';
+  const accuracyRows = [
+    [I18n.t('ext_acc_pass'), pct(totals.passesCompleted, totals.passesAttempted), totals.passesCompleted, totals.passesAttempted, ['passesCompleted','passesAttempted']],
+    [I18n.t('ext_acc_dribble'), pct(totals.dribblesCompleted, totals.dribblesAttempted), totals.dribblesCompleted, totals.dribblesAttempted, ['dribblesCompleted','dribblesAttempted']],
+    [I18n.t('ext_acc_tackle'), pct(totals.tacklesWon, totals.tacklesAttempted), totals.tacklesWon, totals.tacklesAttempted, ['tacklesWon','tacklesAttempted']],
+    [I18n.t('ext_acc_cross'), pct(totals.crossesCompleted, totals.crossesAttempted), totals.crossesCompleted, totals.crossesAttempted, ['crossesCompleted','crossesAttempted']],
+    [I18n.t('ext_acc_duel'), pct(totals.duelsWon, totals.duelsAttempted), totals.duelsWon, totals.duelsAttempted, ['duelsWon','duelsAttempted']],
+  ].filter(row => row[4].every(key => isFieldVisible(key)));
+
+  el.innerHTML = `
+    <div class="page-header"><div><h1>${I18n.t('pp_nav_stats')}</h1><div class="page-header-sub">${esc(shortName(player.fullName))}</div></div></div>
+    <div class="card">
+      <div class="card-title">${I18n.t('ext_season_totals')}</div>
+      ${visibleSections.length ? visibleSections.map(section => `
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px">${extSectionLabel(section)}</div>
+          <div class="stat-grid" style="margin-bottom:0">
+            ${section.fields.map(f => `
+              <div class="stat-card">
+                <div class="val" style="font-size:22px">${totals[f.key]||0}</div>
+                <div class="lbl">${extFieldLabel(f)}</div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('') : `<p style="font-size:12px;color:var(--muted)">${I18n.t('ext_all_hidden')}</p>`}
+    </div>
+    ${accuracyRows.length ? `
+    <div class="card">
+      <div class="card-title">${I18n.t('ext_accuracy_title')}</div>
+      ${accuracyRows.map(([label, pctVal, made, total]) => `
+        <div class="prog-wrap">
+          <div class="prog-label">
+            <span>${label}</span>
+            <span>${pctVal}%${typeof pctVal === 'number' ? ` (${made}/${total})` : ''}</span>
+          </div>
+          <div class="prog-bar"><div class="prog-fill" style="width:${typeof pctVal==='number'?pctVal:0}%"></div></div>
+        </div>`).join('')}
+    </div>` : ''}
+  `;
+}
 
 async function renderPlayerEvents(playerId) {
   const el = document.getElementById(`tracked-events-${playerId}`);
@@ -7210,11 +7619,13 @@ const Nav = (() => {
     const pageMeta = {
       home:      { icon: '&#127968;', key: 'pp_nav_home' },
       dashboard: { icon: '&#128202;', key: 'pp_nav_dashboard' },
+      stats:     { icon: '&#9889;',  key: 'pp_nav_stats' },
       training:  { icon: '&#9917;',  key: 'pp_nav_training' },
       games:     { icon: '&#127944;', key: 'pp_nav_games' },
       clubs:     { icon: '&#127942;', key: 'pp_nav_clubs' },
       achievements: { icon: '&#127941;', key: 'pp_nav_achievements' },
       events:    { icon: '&#128197;', key: 'pp_nav_events' },
+      teamsummary: { icon: '&#128202;', key: 'pp_nav_teamsummary' },
     };
     const nameEl = document.getElementById('playerPortalPageName');
     if (nameEl && pageMeta[section]) {
@@ -7226,11 +7637,13 @@ const Nav = (() => {
     try {
       if (section === 'home')      { gdDebugLog('calling renderPlayerPortalHome()'); await renderPlayerPortalHome(); gdDebugLog('renderPlayerPortalHome() finished OK'); }
       if (section === 'dashboard') { gdDebugLog('calling renderPlayerPortalStats()'); await renderPlayerPortalStats(); gdDebugLog('renderPlayerPortalStats() finished OK'); }
+      if (section === 'stats')     { gdDebugLog('calling renderPlayerPortalExtendedStats()'); await renderPlayerPortalExtendedStats(); gdDebugLog('renderPlayerPortalExtendedStats() finished OK'); }
       if (section === 'training')  { gdDebugLog('calling renderPlayerTrainingShell()'); await renderPlayerTrainingShell(State.portalPlayerId); gdDebugLog('renderPlayerTrainingShell() finished OK'); }
       if (section === 'games')     { gdDebugLog('calling renderPlayerPortalGames()'); await renderPlayerPortalGames(); gdDebugLog('renderPlayerPortalGames() finished OK'); }
       if (section === 'clubs')     { gdDebugLog('calling renderPlayerPortalClubs()'); await renderPlayerPortalClubs(); gdDebugLog('renderPlayerPortalClubs() finished OK'); }
       if (section === 'achievements') { gdDebugLog('calling renderPlayerPortalAchievements()'); await renderPlayerPortalAchievements(); gdDebugLog('renderPlayerPortalAchievements() finished OK'); }
       if (section === 'events')    { gdDebugLog('calling renderPlayerPortalEvents()'); await renderPlayerPortalEvents(); gdDebugLog('renderPlayerPortalEvents() finished OK'); }
+      if (section === 'teamsummary') { gdDebugLog('calling renderPlayerPortalTeamSummary()'); await renderPlayerPortalTeamSummary(); gdDebugLog('renderPlayerPortalTeamSummary() finished OK'); }
       gdDebugLog(`target.innerHTML.length after render = ${target.innerHTML.length}`);
     } catch(err) {
       // Show the real error directly on the page instead of leaving it
@@ -9296,6 +9709,11 @@ setInterval(() => {
   if (current === 'home') Render.home();
   if (current === 'dashboard') Render.dashboard();
   if (current === 'teamSummary') Render.teamSummary();
+  // Player portal — same staleness risk applies there too.
+  if (State.portalPlayerId && document.getElementById('playerPortal')?.style.display !== 'none') {
+    if (State.currentPortalSection === 'home') renderPlayerPortalHome();
+    if (State.currentPortalSection === 'teamsummary') renderPlayerPortalTeamSummary();
+  }
 }, 120000);
 
 // Auto-sync when coming back online
