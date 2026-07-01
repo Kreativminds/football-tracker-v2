@@ -852,7 +852,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
   APP_VERSION: '1.1.0',
-  SCHEMA_VERSION: 9,
+  SCHEMA_VERSION: 12,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
   FULL_GAME_MINS: 80,
@@ -1502,18 +1502,88 @@ async function getTrainingProgress(playerId, seasonId) {
       if (!key) return;
       if (!totals[key]) totals[key] = { sessionCount: 0, skippedCount: 0, fieldSums: {}, isLibrary: !!d.libraryKey };
       totals[key].sessionCount++;
-      if (d.skipped) totals[key].skippedCount++;
+      const status = getDrillCompletionStatus(d);
+      if (status === 'skipped' || status === 'missed') totals[key].skippedCount++;
 
       const fields = d.libraryKey
-        ? (getLibraryDrill(d.libraryKey)?.scoreFields || [])
+        ? (getLibraryDrill(d.libraryKey)?.kpiFields || [])
         : (DRILL_TYPES.find(dt => dt.key === d.drillType)?.fields || []);
       fields.forEach(f => {
-        if (f.isText) return;
+        // Only number/time/distance/percentage are summable. boolean,
+        // choice, and text fields (Pass 3 schema) don't have a meaningful
+        // sum, and the old isText flag (legacy DRILL_TYPES shape) is kept
+        // as a fallback check for drills that predate the type field.
+        const nonSummable = f.isText || (f.type && !['number','time','distance','percentage'].includes(f.type));
+        if (nonSummable) return;
+        // Pass 5: only sum values for drills that were actually attempted
+        // (completed or partial) — a skipped/missed drill's leftover zero
+        // or stale value should never inflate totals.
+        if (!isKpiEntryEnabled(status) || status === 'not_started') return;
         totals[key].fieldSums[f.key] = (totals[key].fieldSums[f.key]||0) + (parseFloat(d[f.key])||0);
       });
     });
   });
   return { sessions, totals };
+}
+
+// ── PASS 3 — KPI VALUE FORMATTING ────────────────────────────────────────────
+// Renders a stored numeric value using its field's declared format string
+// (e.g. '{v}%' or '{v}s'), falling back to the plain number for any field
+// with no format set — covers fields from before this schema existed.
+function formatKpiValue(field, value) {
+  if (value === undefined || value === null || value === '') return '—';
+  if (field?.type === 'boolean') return value ? I18n.t('common_yes') : I18n.t('common_no');
+  if (field?.format) return field.format.replace('{v}', value);
+  return String(value);
+}
+
+// ── PASS 3 — PERSONAL BEST / LAST ATTEMPT / AVERAGE ──────────────────────────
+// Aggregates a player's completed session history for one specific drill,
+// per KPI field, respecting each field's own showAverage/showPersonalBest
+// flags rather than assuming every numeric field wants both. goalDirection
+// decides whether "best" means the highest or lowest recorded value.
+async function getDrillHistoryForPlayer(drillKey, playerId, seasonId) {
+  const sessions = (await getTrainingSessionsForPlayer(playerId, seasonId))
+    .filter(s => s.status === 'Completed')
+    .sort((a,b) => new Date(b.scheduledDate||0) - new Date(a.scheduledDate||0)); // newest first
+
+  const matching = [];
+  sessions.forEach(s => {
+    (s.drills||[]).forEach(d => {
+      const status = getDrillCompletionStatus(d);
+      if (d.libraryKey === drillKey && isKpiEntryEnabled(status) && status !== 'not_started') matching.push(d);
+    });
+  });
+
+  if (!matching.length) return { totalAttempts: 0, fields: {} };
+
+  const drill = getLibraryDrill(drillKey);
+  const kpiFields = drill?.kpiFields || [];
+  const fieldResults = {};
+
+  kpiFields.forEach(f => {
+    const values = matching.map(d => d[f.key]).filter(v => v !== undefined && v !== null && v !== '');
+    const lastAttempt = values.length ? matching.find(d => d[f.key] !== undefined && d[f.key] !== null && d[f.key] !== '')[f.key] : null;
+
+    let average = null;
+    if (f.showAverage && values.length && ['number','time','distance','percentage'].includes(f.type)) {
+      const nums = values.map(v => parseFloat(v)).filter(v => !isNaN(v));
+      average = nums.length ? (nums.reduce((a,b)=>a+b,0) / nums.length) : null;
+      if (average !== null) average = Math.round(average * 10) / 10; // one decimal place, no more
+    }
+
+    let personalBest = null;
+    if (f.showPersonalBest && values.length && ['number','time','distance','percentage'].includes(f.type)) {
+      const nums = values.map(v => parseFloat(v)).filter(v => !isNaN(v));
+      if (nums.length) {
+        personalBest = f.goalDirection === 'lower' ? Math.min(...nums) : Math.max(...nums);
+      }
+    }
+
+    fieldResults[f.key] = { field: f, lastAttempt, average, personalBest };
+  });
+
+  return { totalAttempts: matching.length, fields: fieldResults };
 }
 
 // ── OPPONENT DROPDOWN — ADD/EDIT GAME FORM ───────────────────────────────────
@@ -2067,6 +2137,10 @@ const TR = {
     tr_title:'Training Sessions',
     tr_btn_create_for_player:'+ Create Session for {name}',
     tr_status_scheduled:'Scheduled', tr_status_completed:'Completed',
+    tr_status_not_started:'Not Started', tr_status_partial:'Partially Completed',
+    tr_status_skipped:'Skipped', tr_status_missed:'Missed',
+    tr_completion_status:'Status',
+    tr_move_up:'Move up', tr_move_down:'Move down',
     tr_created_by_player:'Self-created', tr_created_by_guardian:'Assigned by guardian',
     tr_empty_title:'No training sessions yet',
     tr_empty_desc_guardian:'Create one for {name}, or wait for them to log their own.',
@@ -2103,6 +2177,68 @@ const TR = {
     tr_btn_save_and_complete:'Save & Mark Completed',
     tr_auto_name_prefix:'Training',
     tr_auto_name_more:'more',
+
+    // ── PASS 1 — DRILL OWNERSHIP ──
+    drill_owner_official:'Official', drill_owner_guardian:'Guardian', drill_owner_player:'Player',
+
+    // ── PASS 2 — DRILL PICKER & DETAIL POPUP ──
+    drill_equipment_prefix:'Equipment:',
+    drill_kpis_tracked:'KPIs Tracked',
+    drill_history_placeholder:'Previous best, last attempt, and average will appear here in a future update.',
+    drill_history_title:'Your History',
+    drill_history_none:'No previous attempts.',
+
+    // ── PASS 4 — CUSTOM DRILL BUILDER ──
+    drill_builder_new_title:'Create Drill', drill_builder_edit_title:'Edit Drill',
+    drill_builder_section_basics:'Basics', drill_builder_section_description:'Description', drill_builder_section_kpis:'KPIs Tracked',
+    drill_builder_name:'Drill Name *', drill_builder_category:'Category', drill_builder_category_placeholder:'e.g. Passing',
+    drill_builder_difficulty:'Difficulty', drill_builder_duration:'Duration (min)', drill_builder_equipment:'Equipment',
+    drill_builder_add_kpi:'+ Add KPI Field', drill_builder_no_kpis:'No KPI fields yet — add one to track results for this drill.',
+    drill_builder_kpi_label:'Field name (e.g. Goals Scored)',
+    drill_builder_show_average:'Show average', drill_builder_show_pb:'Show personal best',
+    drill_builder_goal_direction:'Better is', drill_builder_higher_better:'Higher', drill_builder_lower_better:'Lower',
+    drill_builder_save:'Save Drill', drill_builder_saved:'Drill saved.',
+    drill_builder_err_name_required:'Drill name is required.',
+    drill_err_cannot_edit:'You do not have permission to edit this drill.',
+    drill_btn_duplicate:'Duplicate', drill_btn_edit:'Edit', drill_btn_archive:'Archive',
+    drill_confirm_archive:'Archive this drill? It will be hidden from the picker but stays visible in any past sessions that already used it.',
+    drill_archived:'Drill archived.', drill_duplicated:'Duplicated — you now have your own editable copy.',
+    drill_duplicate_suffix:'(Copy)',
+    drill_picker_create_drill:'+ Create Your Own Drill',
+    kpi_type_number:'Number', kpi_type_time:'Time', kpi_type_distance:'Distance', kpi_type_percentage:'Percentage',
+    kpi_type_boolean:'Yes/No', kpi_type_choice:'Choice List', kpi_type_text:'Text Note',
+
+    // ── PASS 4 — TRAINING PACKS ──
+    pack_tab_title:'Training Packs', pack_btn_create:'+ Create Pack',
+    pack_tab_empty:'No training packs yet.',
+    pack_drills_suffix:'drills',
+    pack_builder_new_title:'Create Training Pack', pack_builder_edit_title:'Edit Training Pack',
+    pack_builder_name:'Pack Name *', pack_builder_description:'Description',
+    pack_builder_skills:'Skills Trained', pack_builder_skills_placeholder:'e.g. Passing, Fitness (comma separated)',
+    pack_builder_drills:'Drills in this Pack', pack_builder_add_drill:'+ Add Drill',
+    pack_builder_no_drills:'No drills added yet.',
+    pack_builder_estimated_duration:'Estimated total duration: {min} min',
+    pack_builder_save:'Save Pack', pack_builder_saved:'Pack saved.',
+    pack_builder_err_name_required:'Pack name is required.',
+    pack_builder_err_no_drills:'Add at least one drill to this pack.',
+    pack_err_cannot_edit:'You do not have permission to edit this pack.',
+    pack_drills_included:'Drills Included',
+    pack_confirm_archive:'Archive this pack? It will be hidden from the list, but any session that already used it is completely unaffected.',
+    pack_btn_add_to_session:'Add All Drills to Session',
+    pack_added_to_session:'{n} drill(s) added to your session.',
+    drill_total_attempts:'Total Attempts',
+    drill_personal_best:'Personal Best',
+    drill_last_attempt:'Last Attempt',
+    drill_average:'Average',
+    drill_btn_favourite:'Favourite', drill_btn_unfavourite:'Unfavourite',
+    drill_btn_back:'Back', drill_btn_add:'Add to Session', drill_btn_change:'Change',
+    drill_picker_title:'Choose a Drill',
+    drill_picker_search_placeholder:'Search drills...',
+    drill_picker_favourites_chip:'&#9733; Favourites',
+    drill_picker_no_results:'No drills match your search or filters.',
+    drill_picker_no_drill_selected:'No drill selected',
+    drill_picker_legacy_link:'Looking for an older drill type?',
+    drill_picker_legacy_select:'— Select a generic drill type —',
 
     // ── DRILL LIBRARY — DRILL NAMES ──
     drilllib_warmUp:'Warm-Up',
@@ -2893,6 +3029,10 @@ const TR = {
     tr_title:'Sessões de Treino',
     tr_btn_create_for_player:'+ Criar Sessão para {name}',
     tr_status_scheduled:'Agendada', tr_status_completed:'Concluída',
+    tr_status_not_started:'Não Iniciado', tr_status_partial:'Parcialmente Concluído',
+    tr_status_skipped:'Ignorado', tr_status_missed:'Não Realizado',
+    tr_completion_status:'Estado',
+    tr_move_up:'Mover para cima', tr_move_down:'Mover para baixo',
     tr_created_by_player:'Criada por ele(a)', tr_created_by_guardian:'Atribuída pelo encarregado',
     tr_empty_title:'Ainda sem sessões de treino',
     tr_empty_desc_guardian:'Crie uma para {name}, ou espere que ele(a) registe a sua própria.',
@@ -2929,6 +3069,68 @@ const TR = {
     tr_btn_save_and_complete:'Guardar e Marcar como Concluída',
     tr_auto_name_prefix:'Treino',
     tr_auto_name_more:'mais',
+
+    // ── PASS 1 — DRILL OWNERSHIP ──
+    drill_owner_official:'Oficial', drill_owner_guardian:'Encarregado', drill_owner_player:'Jogador',
+
+    // ── PASS 2 — DRILL PICKER & DETAIL POPUP ──
+    drill_equipment_prefix:'Equipamento:',
+    drill_kpis_tracked:'KPIs Registados',
+    drill_history_placeholder:'O melhor resultado anterior, a última tentativa e a média irão aparecer aqui numa atualização futura.',
+    drill_history_title:'O Seu Histórico',
+    drill_history_none:'Sem tentativas anteriores.',
+
+    // ── PASS 4 — CUSTOM DRILL BUILDER ──
+    drill_builder_new_title:'Criar Exercício', drill_builder_edit_title:'Editar Exercício',
+    drill_builder_section_basics:'Informação Básica', drill_builder_section_description:'Descrição', drill_builder_section_kpis:'KPIs Registados',
+    drill_builder_name:'Nome do Exercício *', drill_builder_category:'Categoria', drill_builder_category_placeholder:'ex.: Passe',
+    drill_builder_difficulty:'Dificuldade', drill_builder_duration:'Duração (min)', drill_builder_equipment:'Equipamento',
+    drill_builder_add_kpi:'+ Adicionar Campo KPI', drill_builder_no_kpis:'Ainda sem campos KPI — adicione um para registar resultados deste exercício.',
+    drill_builder_kpi_label:'Nome do campo (ex.: Golos Marcados)',
+    drill_builder_show_average:'Mostrar média', drill_builder_show_pb:'Mostrar melhor resultado pessoal',
+    drill_builder_goal_direction:'Melhor é', drill_builder_higher_better:'Mais Alto', drill_builder_lower_better:'Mais Baixo',
+    drill_builder_save:'Guardar Exercício', drill_builder_saved:'Exercício guardado.',
+    drill_builder_err_name_required:'O nome do exercício é obrigatório.',
+    drill_err_cannot_edit:'Não tem permissão para editar este exercício.',
+    drill_btn_duplicate:'Duplicar', drill_btn_edit:'Editar', drill_btn_archive:'Arquivar',
+    drill_confirm_archive:'Arquivar este exercício? Fica escondido do seletor mas continua visível em sessões anteriores que já o usaram.',
+    drill_archived:'Exercício arquivado.', drill_duplicated:'Duplicado — agora tem a sua própria cópia editável.',
+    drill_duplicate_suffix:'(Cópia)',
+    drill_picker_create_drill:'+ Criar o Seu Próprio Exercício',
+    kpi_type_number:'Número', kpi_type_time:'Tempo', kpi_type_distance:'Distância', kpi_type_percentage:'Percentagem',
+    kpi_type_boolean:'Sim/Não', kpi_type_choice:'Lista de Escolha', kpi_type_text:'Nota de Texto',
+
+    // ── PASS 4 — TRAINING PACKS ──
+    pack_tab_title:'Pacotes de Treino', pack_btn_create:'+ Criar Pacote',
+    pack_tab_empty:'Ainda sem pacotes de treino.',
+    pack_drills_suffix:'exercícios',
+    pack_builder_new_title:'Criar Pacote de Treino', pack_builder_edit_title:'Editar Pacote de Treino',
+    pack_builder_name:'Nome do Pacote *', pack_builder_description:'Descrição',
+    pack_builder_skills:'Capacidades Trabalhadas', pack_builder_skills_placeholder:'ex.: Passe, Condição Física (separado por vírgulas)',
+    pack_builder_drills:'Exercícios Neste Pacote', pack_builder_add_drill:'+ Adicionar Exercício',
+    pack_builder_no_drills:'Ainda sem exercícios adicionados.',
+    pack_builder_estimated_duration:'Duração total estimada: {min} min',
+    pack_builder_save:'Guardar Pacote', pack_builder_saved:'Pacote guardado.',
+    pack_builder_err_name_required:'O nome do pacote é obrigatório.',
+    pack_builder_err_no_drills:'Adicione pelo menos um exercício a este pacote.',
+    pack_err_cannot_edit:'Não tem permissão para editar este pacote.',
+    pack_drills_included:'Exercícios Incluídos',
+    pack_confirm_archive:'Arquivar este pacote? Fica escondido da lista, mas qualquer sessão que já o tenha usado não é afetada.',
+    pack_btn_add_to_session:'Adicionar Todos os Exercícios à Sessão',
+    pack_added_to_session:'{n} exercício(s) adicionados à sua sessão.',
+    drill_total_attempts:'Total de Tentativas',
+    drill_personal_best:'Melhor Resultado Pessoal',
+    drill_last_attempt:'Última Tentativa',
+    drill_average:'Média',
+    drill_btn_favourite:'Favorito', drill_btn_unfavourite:'Remover Favorito',
+    drill_btn_back:'Voltar', drill_btn_add:'Adicionar à Sessão', drill_btn_change:'Alterar',
+    drill_picker_title:'Escolher um Exercício',
+    drill_picker_search_placeholder:'Pesquisar exercícios...',
+    drill_picker_favourites_chip:'&#9733; Favoritos',
+    drill_picker_no_results:'Nenhum exercício corresponde à pesquisa ou filtros.',
+    drill_picker_no_drill_selected:'Nenhum exercício selecionado',
+    drill_picker_legacy_link:'Procura um tipo de exercício mais antigo?',
+    drill_picker_legacy_select:'— Selecione um tipo de exercício genérico —',
 
     // ── DRILL LIBRARY — DRILL NAMES ──
     drilllib_warmUp:'Aquecimento',
@@ -3470,6 +3672,39 @@ const DB = (() => {
           ts.createIndex('playerId', 'playerId', { unique: false });
           ts.createIndex('seasonId', 'seasonId', { unique: false });
           ts.createIndex('status', 'status', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('customDrills')) {
+          // Pass 1 — guardian/player-created drills. Kept separate from the
+          // static official DRILL_LIBRARY constant since these need normal
+          // CRUD (create/edit/delete), while the 26 official drills remain
+          // a fixed, code-defined list. getDrillById() reads from both
+          // sources so the rest of the app never needs to know which one a
+          // given drill came from.
+          const cd = db.createObjectStore('customDrills', { keyPath: 'drillId', autoIncrement: true });
+          cd.createIndex('ownerType', 'ownerType', { unique: false });
+          cd.createIndex('ownerId', 'ownerId', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('drillFavourites')) {
+          // Pass 2 — favourites are per (userType, userId), never shared —
+          // a guardian favouriting a drill has no effect on the player's
+          // own favourite list and vice versa.
+          const fv = db.createObjectStore('drillFavourites', { keyPath: 'favouriteId', autoIncrement: true });
+          fv.createIndex('userType', 'userType', { unique: false });
+          fv.createIndex('userId', 'userId', { unique: false });
+          fv.createIndex('drillKey', 'drillKey', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('trainingPacks')) {
+          // Pass 4 — a pack stores lightweight drillRefs (kind + key), NOT
+          // full drill copies. This is what a pack itself owns and what
+          // gets edited when someone edits their own pack later. When a
+          // pack is added to a SESSION, each ref is resolved and the full
+          // drill data is snapshotted directly into that session's own
+          // drills array — the pack and the session are never linked after
+          // that point, by design (see addPackToSession).
+          const tp = db.createObjectStore('trainingPacks', { keyPath: 'packId', autoIncrement: true });
+          tp.createIndex('ownerType', 'ownerType', { unique: false });
+          tp.createIndex('ownerId', 'ownerId', { unique: false });
+          tp.createIndex('status', 'status', { unique: false });
         }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
@@ -4456,160 +4691,170 @@ const DRILL_LIBRARY = [
     instructions:'Light jogging, dynamic stretches, and gradual increase in intensity for 10 minutes before starting the main session.',
     coachingPoints:'Keep the pace easy, focus on loosening up joints and muscles, not on speed.',
     progression:'Add football-specific movements (high knees, side shuffles) as fitness improves.',
-    scoreFields:[{key:'durationMin',label:'Duration (min)'}],
+    kpiFields:[{key:'durationMin',label:'Duration (min)',type:'time',unit:'min',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v} min'}],
     defaultValues:{durationMin:10} },
   { key:'situpsPushups', category:'Strength', type:'Solo', durationMin:5, difficulty:'Easy', equipment:'None', isDefault:true,
     objective:'Build core and upper body strength to support overall athletic performance.',
     instructions:'Complete at least 20 sit-ups and 20 push-ups, with good form prioritised over speed.',
     coachingPoints:'Controlled movement, full range of motion, breathe steadily.',
     progression:'Increase reps or add a second set as strength improves.',
-    scoreFields:[{key:'situps',label:'Sit-Ups Completed'},{key:'pushups',label:'Push-Ups Completed'}],
+    kpiFields:[
+      {key:'situps',label:'Sit-Ups Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},
+      {key:'pushups',label:'Push-Ups Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}],
     defaultValues:{situps:20,pushups:20} },
   { key:'wallPassing100', category:'Passing', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Wall',
     objective:'Improve passing accuracy and first touch with both feet.',
     instructions:'Pass 25 times with the right foot, 25 with the left foot, then alternate until reaching 100 passes. Stand 3 to 5 metres from the wall.',
     coachingPoints:'Head up, lock the ankle, use the inside of the foot, control into space.',
     progression:'Two-touch only, then one-touch, increase distance.',
-    scoreFields:[{key:'totalPasses',label:'Total Passes'},{key:'mistakes',label:'Mistakes'},{key:'longestStreak',label:'Longest Streak'}] },
+    kpiFields:[{key:'totalPasses',label:'Total Passes',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'mistakes',label:'Mistakes',type:'number',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v}'},{key:'longestStreak',label:'Longest Streak',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'firstTouchWallControl', category:'First Touch', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Wall',
     objective:'Improve first touch and control.',
     instructions:'Pass against the wall, control with the first touch, repeat continuously.',
     coachingPoints:'Cushion the ball, open body, scan before receiving.',
     progression:'Use weaker foot, then one-touch return.',
-    scoreFields:[{key:'successfulControls',label:'Successful Controls'},{key:'mistakes',label:'Mistakes'}] },
+    kpiFields:[{key:'successfulControls',label:'Successful Controls',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'mistakes',label:'Mistakes',type:'number',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v}'}] },
   { key:'twoTouchWallPassing', category:'Passing', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball, Wall',
     objective:'Develop passing rhythm.',
     instructions:'Control with first touch, pass with second touch for the full session.',
     coachingPoints:'Soft first touch, accurate pass.',
     progression:'Faster tempo, weaker foot only.',
-    scoreFields:[{key:'passesCompleted',label:'Passes Completed'},{key:'accuracyPct',label:'Accuracy (%)'}] },
+    kpiFields:[{key:'passesCompleted',label:'Passes Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'accuracyPct',label:'Accuracy (%)',type:'percentage',unit:'%',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}%'}] },
   { key:'oneTouchWallPassing', category:'Passing', type:'Solo', durationMin:8, difficulty:'Medium', equipment:'Ball, Wall',
     objective:'Improve quick passing.',
     instructions:'Return every ball first time without controlling it.',
     coachingPoints:'Stay light on your feet, accuracy before power.',
     progression:'Increase speed or distance.',
-    scoreFields:[{key:'longestStreak',label:'Longest Streak'},{key:'mistakes',label:'Mistakes'}] },
+    kpiFields:[{key:'longestStreak',label:'Longest Streak',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'mistakes',label:'Mistakes',type:'number',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v}'}] },
   { key:'weakFootWallPasses', category:'Passing', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Wall',
     objective:'Build confidence with the weaker foot.',
     instructions:'Complete all passes using only the weaker foot.',
     coachingPoints:'Good balance, follow through.',
     progression:'One-touch only.',
-    scoreFields:[{key:'accuratePasses',label:'Accurate Passes Completed'}] },
+    kpiFields:[{key:'accuratePasses',label:'Accurate Passes Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'coneSlalomDribble', category:'Dribbling', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, 6 Cones',
     objective:'Improve close ball control.',
     instructions:'Dribble through six cones without touching them. Repeat continuously.',
     coachingPoints:'Small touches, head up, use both feet.',
     progression:'Narrow cone spacing, increase speed.',
-    scoreFields:[{key:'bestTimeSec',label:'Best Time (sec)'},{key:'coneTouches',label:'Cone Touches'}] },
+    kpiFields:[{key:'bestTimeSec',label:'Best Time (sec)',type:'time',unit:'sec',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}s'},{key:'coneTouches',label:'Cone Touches',type:'number',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v}'}] },
   { key:'figure8Dribbling', category:'Dribbling', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, 2 Cones',
     objective:'Improve turning and close control.',
     instructions:'Dribble continuously in a figure 8 around two cones.',
     coachingPoints:'Stay balanced, use both feet.',
     progression:'Reduce cone distance.',
-    scoreFields:[{key:'lapsCompleted',label:'Laps Completed'}] },
+    kpiFields:[{key:'lapsCompleted',label:'Laps Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'insideOutsideTouches', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball',
     objective:'Improve coordination.',
     instructions:'Alternate inside and outside touches while moving forward.',
     coachingPoints:'Keep the ball close, quick feet.',
     progression:'Faster tempo, weaker foot only.',
-    scoreFields:[{key:'touchesPerMin',label:'Touches in One Minute'}] },
+    kpiFields:[{key:'touchesPerMin',label:'Touches in One Minute',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'soleRolls', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Easy', equipment:'Ball',
     objective:'Improve balance and control.',
     instructions:'Roll the ball from side to side using the sole of each foot.',
     coachingPoints:'Bend knees, stay light.',
     progression:'Add forward movement.',
-    scoreFields:[{key:'rollsCompleted',label:'Rolls Completed'}] },
+    kpiFields:[{key:'rollsCompleted',label:'Rolls Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'vPulls', category:'Ball Mastery', type:'Solo', durationMin:8, difficulty:'Medium', equipment:'Ball',
     objective:'Improve turns and ball manipulation.',
     instructions:'Pull the ball back with the sole, push it forward diagonally to form a V shape.',
     coachingPoints:'Keep movements sharp and controlled.',
     progression:'Alternate feet.',
-    scoreFields:[{key:'repsCompleted',label:'Repetitions Completed'}] },
+    kpiFields:[{key:'repsCompleted',label:'Repetitions Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'croquetaMaster', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, 2 Cones',
     objective:'Learn to escape pressure using the Croqueta.',
     instructions:'Dribble to a cone, perform the Croqueta, accelerate for 5 metres. Repeat.',
     coachingPoints:'Shift weight quickly, accelerate immediately.',
     progression:'Add a second cone defender.',
-    scoreFields:[{key:'repsCompleted',label:'Successful Repetitions'}] },
+    kpiFields:[{key:'repsCompleted',label:'Successful Repetitions',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'insideOutsideMove', category:'Skills', type:'Solo', durationMin:10, difficulty:'Easy', equipment:'Ball, Cones',
     objective:'Master the In-Out move.',
     instructions:'Push the ball with the inside then immediately with the outside of the same foot around a cone.',
     coachingPoints:'Quick touch, explosive exit.',
     progression:'Alternate feet.',
-    scoreFields:[{key:'repsCompleted',label:'Successful Repetitions'}] },
+    kpiFields:[{key:'repsCompleted',label:'Successful Repetitions',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'sambaRoll', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball',
     objective:'Improve coordination and close control.',
     instructions:'Roll the ball across your body with the sole and accelerate away.',
     coachingPoints:'Stay balanced, keep the ball close.',
     progression:'Perform while moving.',
-    scoreFields:[{key:'consecutiveRolls',label:'Consecutive Successful Rolls'}] },
+    kpiFields:[{key:'consecutiveRolls',label:'Consecutive Successful Rolls',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'cruyffTurn', category:'Skills', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Cone',
     objective:'Master the Cruyff Turn.',
     instructions:'Fake a pass or shot, pull the ball behind the standing leg and change direction.',
     coachingPoints:'Sell the fake, accelerate away.',
     progression:'Add a finish after the turn.',
-    scoreFields:[{key:'successfulTurns',label:'Successful Turns'}] },
+    kpiFields:[{key:'successfulTurns',label:'Successful Turns',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'jugglingChallenge', category:'Ball Mastery', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball',
     objective:'Improve touch and coordination.',
     instructions:'Keep the ball in the air as long as possible using both feet.',
     coachingPoints:'Relax, soft touches, use both feet.',
     progression:'Weaker foot only.',
-    scoreFields:[{key:'highestCount',label:'Highest Juggle Count'}] },
+    kpiFields:[{key:'highestCount',label:'Highest Juggle Count',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'sprintWithBall', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Ball, Cones',
     objective:'Improve acceleration while dribbling.',
     instructions:'Sprint 20 metres with the ball and repeat after recovery.',
     coachingPoints:'Push the ball into space, head up.',
     progression:'Add direction changes.',
-    scoreFields:[{key:'bestSprintTimeSec',label:'Best Sprint Time (sec)'}] },
+    kpiFields:[{key:'bestSprintTimeSec',label:'Best Sprint Time (sec)',type:'time',unit:'sec',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}s'}] },
   { key:'zigZagSprint', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'6 Cones',
     objective:'Improve agility and speed.',
     instructions:'Sprint through cones in a zig-zag pattern.',
     coachingPoints:'Stay low during direction changes.',
     progression:'Perform with the ball.',
-    scoreFields:[{key:'fastestTimeSec',label:'Fastest Time (sec)'}] },
+    kpiFields:[{key:'fastestTimeSec',label:'Fastest Time (sec)',type:'time',unit:'sec',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}s'}] },
   { key:'reactionSprint', category:'Speed', type:'Solo', durationMin:10, difficulty:'Medium', equipment:'Cones',
     objective:'Improve reaction speed.',
     instructions:'Start facing away from the cones. On a signal, sprint to the designated cone.',
     coachingPoints:'Explosive first step.',
     progression:'Add a ball after the sprint.',
-    scoreFields:[{key:'reactionTimeSec',label:'Reaction Time (sec)'}] },
+    kpiFields:[{key:'reactionTimeSec',label:'Reaction Time (sec)',type:'time',unit:'sec',goalDirection:'lower',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}s'}] },
   { key:'targetShooting', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Goal, Targets',
     objective:'Improve shooting accuracy.',
     instructions:'Aim for different target zones in the goal.',
     coachingPoints:'Accuracy before power, proper body position.',
     progression:'Smaller targets, weaker foot.',
-    scoreFields:[{key:'targetHits',label:'Target Hits'},{key:'goalsScored',label:'Goals Scored'}] },
+    kpiFields:[{key:'targetHits',label:'Target Hits',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'goalsScored',label:'Goals Scored',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'dribbleAndFinish', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Cones, Goal',
     objective:'Finish after beating a defender.',
     instructions:'Complete a slalom through cones before shooting.',
     coachingPoints:'Positive first touch, keep composure.',
     progression:'Weaker foot finish.',
-    scoreFields:[{key:'goalsScored',label:'Goals Scored'},{key:'shootingAccuracyPct',label:'Shooting Accuracy (%)'}] },
+    kpiFields:[{key:'goalsScored',label:'Goals Scored',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'shootingAccuracyPct',label:'Shooting Accuracy (%)',type:'percentage',unit:'%',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}%'}] },
   { key:'firstTouchAndShoot', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Hard', equipment:'Ball, Wall, Goal',
     objective:'Shoot quickly after controlling the ball.',
     instructions:'Pass against the wall, control the return and shoot immediately.',
     coachingPoints:'First touch into shooting path.',
     progression:'One-touch finish.',
-    scoreFields:[{key:'goalsScored',label:'Goals Scored'},{key:'shotsOnTarget',label:'Shots on Target'}] },
+    kpiFields:[{key:'goalsScored',label:'Goals Scored',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'},{key:'shotsOnTarget',label:'Shots on Target',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'weakFootFinishing', category:'Shooting', type:'Solo', durationMin:15, difficulty:'Hard', equipment:'Ball, Goal',
     objective:'Improve finishing with the weaker foot.',
     instructions:'Shoot from different angles using only the weaker foot.',
     coachingPoints:'Technique before power.',
     progression:'One-touch finishes.',
-    scoreFields:[{key:'goalsScored',label:'Goals Scored'}] },
+    kpiFields:[{key:'goalsScored',label:'Goals Scored',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
   { key:'soloFitnessWithBall', category:'Fitness', type:'Solo', durationMin:15, difficulty:'Medium', equipment:'Ball, Cones',
     objective:'Build football fitness while keeping the ball.',
     instructions:'Complete shuttle runs, dribbling, turns and sprints continuously.',
     coachingPoints:'Maintain technique while fatigued.',
     progression:'Reduce recovery time.',
-    scoreFields:[{key:'timeCompletedMin',label:'Time Completed (min)'},{key:'distanceCoveredKm',label:'Distance Covered (km)'}] },
+    kpiFields:[{key:'timeCompletedMin',label:'Time Completed (min)',type:'time',unit:'min',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:false,weight:0,format:'{v} min'},{key:'distanceCoveredKm',label:'Distance Covered (km)',type:'distance',unit:'km',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v} km'}] },
   { key:'oneMinuteSkillChallenge', category:'Challenge', type:'Solo', durationMin:5, difficulty:'Easy', equipment:'Ball',
     objective:'Improve speed and technique under pressure.',
     instructions:'Perform as many quality touches or skill moves as possible in one minute.',
     coachingPoints:'Stay relaxed, minimise mistakes.',
     progression:'Increase target each week.',
-    scoreFields:[{key:'totalCompleted',label:'Total Touches or Moves Completed'}] },
+    kpiFields:[{key:'totalCompleted',label:'Total Touches or Moves Completed',type:'number',goalDirection:'higher',showInHistory:true,showAverage:true,showPersonalBest:true,weight:0,format:'{v}'}] },
 ];
+
+// Pass 1 — ownership tiers. Every drill in DRILL_LIBRARY is an official,
+// built-in drill — stamped programmatically rather than edited into all 26
+// entries by hand, so there's no risk of missing one or mistyping a value.
+// This is purely additive: nothing about how these drills already render or
+// behave changes, they simply now carry an explicit ownership tag matching
+// what was already implicitly true.
+DRILL_LIBRARY.forEach(d => { d.ownerType = 'official'; d.ownerId = null; });
 
 function getLibraryDrill(key) {
   return DRILL_LIBRARY.find(d => d.key === key) || null;
@@ -4619,16 +4864,1021 @@ function libDrillDisplayName(key) {
   return I18n.t('drilllib_' + key);
 }
 
+// ── PASS 1 — OWNERSHIP TIERS & UNIFIED DRILL LOOKUP ──────────────────────────
+// Drills now come from two sources: the 26 fixed official drills in
+// DRILL_LIBRARY (unchanged, in-memory, synchronous), and guardian/player
+// created drills in the new customDrills IndexedDB store (async CRUD).
+//
+// getDrillById() unifies both behind one lookup so the rest of the app can
+// treat "a drill" as one concept regardless of where it came from. It's
+// intentionally synchronous, taking an already-loaded customDrills array as
+// its second argument, rather than making every one of the 8 existing call
+// sites (several inside .map() template callbacks) async right now. This
+// keeps every current call site working exactly as before with zero
+// changes; Pass 2's drill library UI will load customDrills once per
+// render and pass it through here, at which point custom drills become
+// visible everywhere this function is used.
+function getDrillById(key, customDrillsList) {
+  const official = getLibraryDrill(key);
+  if (official) return official;
+  if (customDrillsList) return customDrillsList.find(d => String(d.drillId) === String(key)) || null;
+  return null;
+}
+
+async function getAllCustomDrills() {
+  return DB.getAll('customDrills');
+}
+
+// For browsing contexts (the picker, "my drills" lists) — archived drills
+// are intentionally excluded here but NOT from getAllCustomDrills(), since
+// getDrillById() needs to keep resolving archived drills correctly when
+// viewing a past session's history that already used one.
+async function getActiveCustomDrills() {
+  const all = await getAllCustomDrills();
+  return all.filter(d => d.status !== 'archived');
+}
+
+async function saveCustomDrill(drill) {
+  // ownerType/ownerId must already be set by the caller — this function
+  // does not infer ownership, to keep that decision explicit at the point
+  // of creation rather than guessed here.
+  if (!drill.ownerType || drill.ownerType === 'official') {
+    throw new Error('Custom drills must have ownerType "guardian" or "player", never "official".');
+  }
+  if (!drill.status) drill.status = 'active';
+  return DB.put('customDrills', drill);
+}
+
+// Pass 4 — archiving, not hard deletion. A custom drill that's already
+// been used in a past session must stay resolvable when viewing that
+// session's history, so it's hidden from active browsing (status:
+// 'archived') rather than removed from the database. Restorable by simply
+// flipping the status back.
+async function archiveCustomDrill(drillId, requestingAs, requestingOwnerId) {
+  const drill = await DB.get('customDrills', drillId);
+  if (!drill) return;
+  if (!canEditDrill(drill, requestingAs, requestingOwnerId)) {
+    throw new Error('You do not have permission to archive this drill.');
+  }
+  drill.status = 'archived';
+  await DB.put('customDrills', drill);
+}
+
+async function restoreCustomDrill(drillId, requestingAs, requestingOwnerId) {
+  const drill = await DB.get('customDrills', drillId);
+  if (!drill) return;
+  if (!canEditDrill(drill, requestingAs, requestingOwnerId)) {
+    throw new Error('You do not have permission to restore this drill.');
+  }
+  drill.status = 'active';
+  await DB.put('customDrills', drill);
+}
+
+// Official drills can never be edited or archived by anyone — guardian or
+// player. Guardian-owned and player-owned drills can only be edited/archived
+// by whoever created them (matched by ownerType AND ownerId, so a guardian
+// can never edit another guardian's — or a player's — custom drill).
+function canEditDrill(drill, requestingAs, requestingOwnerId) {
+  if (!drill || drill.ownerType === 'official') return false;
+  return drill.ownerType === requestingAs && String(drill.ownerId) === String(requestingOwnerId);
+}
+function canDeleteDrill(drill, requestingAs, requestingOwnerId) {
+  return canEditDrill(drill, requestingAs, requestingOwnerId); // same rule for now
+}
+
+// ── PASS 4 — CUSTOM DRILL BUILDER ────────────────────────────────────────────
+// A single-page form (not literally multi-screen — all fields visible at
+// once, grouped into clear sections) rather than a click-through wizard,
+// since the field count is small enough to review in one place. Ends with
+// an explicit review summary before saving, consistent with the
+// review-before-commit principle already used throughout Training.
+let _drillBuilderKpiFields = [];
+let _drillBuilderEditingId = null;
+
+async function openDrillBuilder(viewAs, existingDrillId) {
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  _drillBuilderEditingId = existingDrillId || null;
+
+  let existing = null;
+  if (existingDrillId) {
+    existing = await DB.get('customDrills', existingDrillId);
+    if (existing && !canEditDrill(existing, userType, userId)) {
+      Toast.error(I18n.t('drill_err_cannot_edit'));
+      return;
+    }
+  }
+  _drillBuilderKpiFields = existing ? JSON.parse(JSON.stringify(existing.kpiFields||[])) : [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'drillBuilderOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:520px;max-height:88vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <h2 style="margin:0">${existing ? I18n.t('drill_builder_edit_title') : I18n.t('drill_builder_new_title')}</h2>
+        <button onclick="document.getElementById('drillBuilderOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px" aria-label="Close">&#10005;</button>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">${I18n.t('drill_builder_section_basics')}</div>
+      <div class="form-grid">
+        <div class="form-group full"><label>${I18n.t('drill_builder_name')}</label><input id="db-name" type="text" value="${esc(existing?.name||'')}"></div>
+        <div class="form-group"><label>${I18n.t('drill_builder_category')}</label><input id="db-category" type="text" value="${esc(existing?.category||'')}" placeholder="${I18n.t('drill_builder_category_placeholder')}"></div>
+        <div class="form-group"><label>${I18n.t('drill_builder_difficulty')}</label>
+          <select id="db-difficulty">
+            ${['Easy','Medium','Hard'].map(d => `<option value="${d}" ${existing?.difficulty===d?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>${I18n.t('drill_builder_duration')}</label><input id="db-duration" type="number" min="0" value="${existing?.durationMin||10}"></div>
+        <div class="form-group"><label>${I18n.t('drill_builder_equipment')}</label><input id="db-equipment" type="text" value="${esc(existing?.equipment||'')}"></div>
+      </div>
+
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:14px 0 8px">${I18n.t('drill_builder_section_description')}</div>
+      <div class="form-grid">
+        <div class="form-group full"><label>${I18n.t('tr_drill_objective')}</label><textarea id="db-objective">${esc(existing?.objective||'')}</textarea></div>
+        <div class="form-group full"><label>${I18n.t('tr_drill_instructions')}</label><textarea id="db-instructions">${esc(existing?.instructions||'')}</textarea></div>
+        <div class="form-group full"><label>${I18n.t('tr_drill_coaching_points')}</label><textarea id="db-coaching">${esc(existing?.coachingPoints||'')}</textarea></div>
+        <div class="form-group full"><label>${I18n.t('tr_drill_progression')}</label><textarea id="db-progression">${esc(existing?.progression||'')}</textarea></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">${I18n.t('drill_builder_section_kpis')}</div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="addDrillBuilderKpiField()">${I18n.t('drill_builder_add_kpi')}</button>
+      </div>
+      <div id="drillBuilderKpiRows"></div>
+
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="saveDrillFromBuilder('${viewAs}')">${I18n.t('drill_builder_save')}</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('drillBuilderOverlay').remove()">${I18n.t('common_cancel')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  renderDrillBuilderKpiRows();
+}
+
+function addDrillBuilderKpiField() {
+  _drillBuilderKpiFields.push({ key: 'field'+Date.now(), label: '', type: 'number', showInHistory: true, showAverage: true, showPersonalBest: true, goalDirection: 'higher', weight: 0, format: '{v}' });
+  renderDrillBuilderKpiRows();
+}
+
+function removeDrillBuilderKpiField(index) {
+  _drillBuilderKpiFields.splice(index, 1);
+  renderDrillBuilderKpiRows();
+}
+
+function updateDrillBuilderKpiField(index, prop, value) {
+  _drillBuilderKpiFields[index][prop] = value;
+  if (prop === 'type') {
+    // Non-numeric types can't meaningfully average or personal-best —
+    // reset those flags so the saved schema stays internally consistent
+    // rather than showing checkboxes that don't apply to the chosen type.
+    const numeric = ['number','time','distance','percentage'].includes(value);
+    _drillBuilderKpiFields[index].showAverage = numeric;
+    _drillBuilderKpiFields[index].showPersonalBest = numeric;
+    renderDrillBuilderKpiRows();
+  }
+}
+
+function renderDrillBuilderKpiRows() {
+  const el = document.getElementById('drillBuilderKpiRows');
+  if (!el) return;
+  const numericTypes = ['number','time','distance','percentage'];
+  el.innerHTML = _drillBuilderKpiFields.map((f, i) => {
+    const isNumeric = numericTypes.includes(f.type);
+    return `
+    <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input type="text" placeholder="${I18n.t('drill_builder_kpi_label')}" value="${esc(f.label)}" oninput="updateDrillBuilderKpiField(${i},'label',this.value)" style="flex:1;min-width:0;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+        <select onchange="updateDrillBuilderKpiField(${i},'type',this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+          ${['number','time','distance','percentage','boolean','choice','text'].map(t => `<option value="${t}" ${f.type===t?'selected':''}>${I18n.t('kpi_type_'+t)}</option>`).join('')}
+        </select>
+        <button type="button" class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="removeDrillBuilderKpiField(${i})">${I18n.t('tr_btn_remove_drill')}</button>
+      </div>
+      ${isNumeric ? `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" ${f.showAverage?'checked':''} onchange="updateDrillBuilderKpiField(${i},'showAverage',this.checked)">${I18n.t('drill_builder_show_average')}</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" ${f.showPersonalBest?'checked':''} onchange="updateDrillBuilderKpiField(${i},'showPersonalBest',this.checked)">${I18n.t('drill_builder_show_pb')}</label>
+        <label style="display:flex;align-items:center;gap:4px">${I18n.t('drill_builder_goal_direction')}:
+          <select onchange="updateDrillBuilderKpiField(${i},'goalDirection',this.value)" style="padding:2px 4px">
+            <option value="higher" ${f.goalDirection==='higher'?'selected':''}>${I18n.t('drill_builder_higher_better')}</option>
+            <option value="lower" ${f.goalDirection==='lower'?'selected':''}>${I18n.t('drill_builder_lower_better')}</option>
+          </select>
+        </label>
+      </div>` : ''}
+    </div>`;
+  }).join('') || `<p style="font-size:12px;color:var(--muted)">${I18n.t('drill_builder_no_kpis')}</p>`;
+}
+
+async function saveDrillFromBuilder(viewAs) {
+  const name = document.getElementById('db-name')?.value.trim();
+  if (!name) { Toast.error(I18n.t('drill_builder_err_name_required')); return; }
+
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  const drill = {
+    ownerType: userType,
+    ownerId: userId,
+    name,
+    category: document.getElementById('db-category')?.value.trim() || I18n.t('drill_builder_category_placeholder'),
+    difficulty: document.getElementById('db-difficulty')?.value || 'Easy',
+    durationMin: parseInt(document.getElementById('db-duration')?.value) || 10,
+    equipment: document.getElementById('db-equipment')?.value.trim() || '',
+    objective: document.getElementById('db-objective')?.value.trim() || '',
+    instructions: document.getElementById('db-instructions')?.value.trim() || '',
+    coachingPoints: document.getElementById('db-coaching')?.value.trim() || '',
+    progression: document.getElementById('db-progression')?.value.trim() || '',
+    kpiFields: JSON.parse(JSON.stringify(_drillBuilderKpiFields)),
+    status: 'active',
+  };
+  if (_drillBuilderEditingId) drill.drillId = _drillBuilderEditingId;
+
+  try {
+    await saveCustomDrill(drill);
+    document.getElementById('drillBuilderOverlay')?.remove();
+    Toast.show(I18n.t('drill_builder_saved'));
+    // If the picker is still open underneath, refresh it so the new drill
+    // appears immediately without needing to close and reopen.
+    if (document.getElementById('drillLibraryPickerOverlay')) {
+      renderDrillLibraryResults(_lastPickerPlayerId, _lastPickerMode, _lastPickerRowIndex);
+    }
+  } catch(err) {
+    Toast.error(err.message);
+  }
+}
+
+// Small badge shown wherever a drill is listed, so ownership is always
+// visible at a glance — official vs guardian-created vs player-created.
+function drillOwnershipBadge(drill) {
+  const type = drill?.ownerType || 'official';
+  const labelKey = { official: 'drill_owner_official', guardian: 'drill_owner_guardian', player: 'drill_owner_player' }[type];
+  const colorMap = { official: 'background:#eef0f3;color:#555', guardian: 'background:#e8f0fb;color:#2a5a9e', player: 'background:#eafaf0;color:#2a7a4e' };
+  return `<span class="pos-pill" style="${colorMap[type]}">${I18n.t(labelKey)}</span>`;
+}
+
+// ── PASS 2 — DRILL FAVOURITES ─────────────────────────────────────────────────
+// Kept in a dedicated store, keyed by (userType, userId, drillKey) — never
+// on the player record — so a guardian's favourites and a player's
+// favourites are always two completely separate lists, even when they're
+// looking at the same drill library.
+async function getFavouriteDrillKeys(userType, userId) {
+  const all = await DB.getAll('drillFavourites');
+  return all.filter(f => f.userType === userType && String(f.userId) === String(userId)).map(f => f.drillKey);
+}
+
+async function isDrillFavourited(drillKey, userType, userId) {
+  const all = await DB.getAll('drillFavourites');
+  return all.some(f => f.userType === userType && String(f.userId) === String(userId) && f.drillKey === drillKey);
+}
+
+async function toggleDrillFavourite(drillKey, userType, userId) {
+  const all = await DB.getAll('drillFavourites');
+  const existing = all.find(f => f.userType === userType && String(f.userId) === String(userId) && f.drillKey === drillKey);
+  if (existing) {
+    await DB.del('drillFavourites', existing.favouriteId);
+    return false; // now unfavourited
+  } else {
+    await DB.put('drillFavourites', { userType, userId, drillKey });
+    return true; // now favourited
+  }
+}
+
+// Resolves "who is currently looking at the picker" into a stable
+// (userType, userId) pair for favourites/ownership — guardian identity
+// comes from the authenticated account, player identity from their own
+// portalPlayerId, so favourites and future custom-drill ownership are
+// always attributed to the right, specific person.
+function getCurrentDrillUser(viewAs) {
+  if (viewAs === 'player') return { userType: 'player', userId: State.portalPlayerId };
+  return { userType: 'guardian', userId: Auth.getUserId() };
+}
+
+// ── PASS 2 — DRILL DETAIL POPUP ──────────────────────────────────────────────
+// The single mandatory review step before a drill can be added to a session
+// or swap an existing row's drill. No other path in the app is allowed to
+// insert a drill directly — this popup's "Add to Session" button is it.
+async function openDrillDetailPopup(drillKey, playerId, mode, rowIndex) {
+  const customDrills = await getAllCustomDrills();
+  const drill = getDrillById(drillKey, customDrills);
+  if (!drill) return;
+
+  const { userType, userId } = getCurrentDrillUser(mode === 'perform' || mode === 'plan' ? _trainingFormViewAs : _trainingFormViewAs);
+  const favourited = await isDrillFavourited(drillKey, userType, userId);
+
+  // Only official/library drills currently carry a real kpiFields schema
+  // with showAverage/showPersonalBest metadata to aggregate against —
+  // custom drills (Pass 4+) and legacy generic types don't have history
+  // wired yet, so they fall through to the "no attempts" empty state.
+  const history = drill.ownerType === 'official'
+    ? await getDrillHistoryForPlayer(drillKey, playerId, State.currentSeasonId)
+    : { totalAttempts: 0, fields: {} };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'drillDetailOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:480px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <h2 style="margin:0">${esc(drill.ownerType === 'official' ? libDrillDisplayName(drill.key) : drill.name)}</h2>
+        <button onclick="document.getElementById('drillDetailOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px" aria-label="Close">&#10005;</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin:8px 0 14px;flex-wrap:wrap">
+        ${drillOwnershipBadge(drill)}
+        <span class="pos-pill">${esc(drill.category||'')}</span>
+        <span class="pos-pill">${esc(drill.difficulty||'')}</span>
+        <span class="pos-pill">${drill.durationMin||0} min</span>
+      </div>
+      <div style="font-size:12px;line-height:1.6;margin-bottom:12px">
+        <div style="margin-bottom:6px"><strong>${I18n.t('tr_drill_objective')}:</strong> ${esc(drill.objective||'—')}</div>
+        <div style="margin-bottom:6px"><strong>${I18n.t('tr_drill_instructions')}:</strong> ${esc(drill.instructions||'—')}</div>
+        <div style="margin-bottom:6px"><strong>${I18n.t('tr_drill_coaching_points')}:</strong> ${esc(drill.coachingPoints||'—')}</div>
+        <div style="margin-bottom:6px"><strong>${I18n.t('tr_drill_progression')}:</strong> ${esc(drill.progression||'—')}</div>
+        <div style="color:var(--muted)">${I18n.t('drill_equipment_prefix')} ${esc(drill.equipment||'—')}</div>
+      </div>
+      <div style="background:#f8f8f8;border-radius:6px;padding:10px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px">${I18n.t('drill_kpis_tracked')}</div>
+        ${(drill.kpiFields||[]).map(f => `<span class="pos-pill" style="margin:0 4px 4px 0">${esc(f.label)}</span>`).join('') || `<span style="font-size:11px;color:var(--muted)">—</span>`}
+      </div>
+      <div style="background:#f8f8f8;border-radius:6px;padding:10px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${I18n.t('drill_history_title')}</div>
+        ${history.totalAttempts === 0 ? `
+          <p style="font-size:12px;color:var(--muted);margin:0">${I18n.t('drill_history_none')}</p>
+        ` : `
+          <p style="font-size:11px;color:var(--muted);margin:0 0 8px">${I18n.t('drill_total_attempts')}: <strong style="color:var(--dark)">${history.totalAttempts}</strong></p>
+          ${Object.values(history.fields).map(r => {
+            if (!r.field.showAverage && !r.field.showPersonalBest) return ''; // e.g. a future notes/text field — nothing to show here
+            return `
+            <div style="margin-bottom:8px">
+              <div style="font-size:11px;font-weight:700;margin-bottom:3px">${esc(r.field.label)}</div>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted)">
+                ${r.field.showPersonalBest ? `<span>${I18n.t('drill_personal_best')}: <strong style="color:var(--dark)">${formatKpiValue(r.field, r.personalBest)}</strong></span>` : ''}
+                <span>${I18n.t('drill_last_attempt')}: <strong style="color:var(--dark)">${formatKpiValue(r.field, r.lastAttempt)}</strong></span>
+                ${r.field.showAverage ? `<span>${I18n.t('drill_average')}: <strong style="color:var(--dark)">${formatKpiValue(r.field, r.average)}</strong></span>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+        `}
+      </div>
+      ${(() => {
+        const canEdit = canEditDrill(drill, userType, userId);
+        if (drill.ownerType === 'official') {
+          return `<button class="btn btn-secondary" style="width:100%;margin-bottom:10px" onclick="duplicateDrillFromPopup('${drillKey}','${mode}')">${I18n.t('drill_btn_duplicate')}</button>`;
+        }
+        if (canEdit) {
+          return `<div style="display:flex;gap:8px;margin-bottom:10px">
+            <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('drillDetailOverlay').remove();openDrillBuilder('${userType}',${drill.drillId})">${I18n.t('drill_btn_edit')}</button>
+            <button class="btn btn-secondary" style="flex:1" onclick="archiveDrillFromPopup('${drillKey}')">${I18n.t('drill_btn_archive')}</button>
+          </div>`;
+        }
+        return '';
+      })()}
+      <div class="form-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <button class="btn btn-secondary" id="drillFavBtn" onclick="handleToggleFavouriteInPopup('${drillKey}','${mode}')">${favourited ? '&#9733; '+I18n.t('drill_btn_unfavourite') : '&#9734; '+I18n.t('drill_btn_favourite')}</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="document.getElementById('drillDetailOverlay').remove();openDrillLibraryPicker(${playerId},'${mode}',${rowIndex ?? 'null'})">${I18n.t('drill_btn_back')}</button>
+          <button class="btn btn-primary" onclick="addDrillFromPicker('${drillKey}',${playerId},'${mode}',${rowIndex ?? 'null'})">${I18n.t('drill_btn_add')}</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function handleToggleFavouriteInPopup(drillKey, mode) {
+  const { userType, userId } = getCurrentDrillUser(_trainingFormViewAs);
+  const nowFavourited = await toggleDrillFavourite(drillKey, userType, userId);
+  const btn = document.getElementById('drillFavBtn');
+  if (btn) btn.innerHTML = nowFavourited ? '&#9733; '+I18n.t('drill_btn_unfavourite') : '&#9734; '+I18n.t('drill_btn_favourite');
+}
+
+// Duplicating an official drill creates an independent, fully-editable
+// Guardian- or Player-owned copy — the official original is never touched
+// and stays read-only, exactly as required.
+async function duplicateDrillFromPopup(drillKey, mode) {
+  const official = getLibraryDrill(drillKey);
+  if (!official) return;
+  const { userType, userId } = getCurrentDrillUser(_trainingFormViewAs);
+  const copy = {
+    ownerType: userType,
+    ownerId: userId,
+    name: libDrillDisplayName(official.key) + ' ' + I18n.t('drill_duplicate_suffix'),
+    category: official.category, difficulty: official.difficulty, durationMin: official.durationMin, equipment: official.equipment,
+    objective: official.objective, instructions: official.instructions, coachingPoints: official.coachingPoints, progression: official.progression,
+    kpiFields: JSON.parse(JSON.stringify(official.kpiFields||[])),
+    status: 'active',
+  };
+  await saveCustomDrill(copy);
+  document.getElementById('drillDetailOverlay')?.remove();
+  Toast.show(I18n.t('drill_duplicated'));
+  if (document.getElementById('drillLibraryPickerOverlay')) {
+    renderDrillLibraryResults(_lastPickerPlayerId, _lastPickerMode, _lastPickerRowIndex);
+  }
+}
+
+async function archiveDrillFromPopup(drillKey) {
+  const { userType, userId } = getCurrentDrillUser(_trainingFormViewAs);
+  if (!window.confirm(I18n.t('drill_confirm_archive'))) return;
+  try {
+    await archiveCustomDrill(parseInt(drillKey), userType, userId);
+    document.getElementById('drillDetailOverlay')?.remove();
+    Toast.show(I18n.t('drill_archived'));
+    if (document.getElementById('drillLibraryPickerOverlay')) {
+      renderDrillLibraryResults(_lastPickerPlayerId, _lastPickerMode, _lastPickerRowIndex);
+    }
+  } catch(err) {
+    Toast.error(err.message);
+  }
+}
+
+// ── PASS 4 — TRAINING PACKS ──────────────────────────────────────────────────
+// A pack stores lightweight drillRefs, never full drill copies — see the
+// trainingPacks store comment for why. Ownership/permission rules mirror
+// custom drills exactly: official is always read-only (duplicate only),
+// guardian/player packs are editable/archivable only by their creator.
+const OFFICIAL_PACK_SEED = [
+  { packId: 'off-warmup-strength', name: 'Warm-Up & Strength Basics', description: 'A simple starter pack covering warm-up and core strength — good for any session.', difficulty: 'Easy', skillsTrained: ['Fitness','Strength'], drillRefs: [{kind:'library',key:'warmUp'},{kind:'library',key:'situpsPushups'}] },
+  { packId: 'off-passing-focus', name: 'Passing Focus', description: 'Wall passing drills building accuracy and rhythm with both feet.', difficulty: 'Easy', skillsTrained: ['Passing'], drillRefs: [{kind:'library',key:'wallPassing100'},{kind:'library',key:'twoTouchWallPassing'},{kind:'library',key:'oneTouchWallPassing'}] },
+  { packId: 'off-shooting-focus', name: 'Shooting Focus', description: 'Target practice and finishing drills to sharpen accuracy in front of goal.', difficulty: 'Medium', skillsTrained: ['Shooting'], drillRefs: [{kind:'library',key:'targetShooting'},{kind:'library',key:'dribbleAndFinish'}] },
+];
+OFFICIAL_PACK_SEED.forEach(p => { p.ownerType = 'official'; p.ownerId = null; p.status = 'active'; p.estimatedDurationMin = null; });
+
+async function getAllPacks() {
+  const custom = await DB.getAll('trainingPacks');
+  return [...OFFICIAL_PACK_SEED, ...custom];
+}
+async function getActivePacks() {
+  const all = await getAllPacks();
+  return all.filter(p => p.status !== 'archived');
+}
+async function getPackById(packId) {
+  const all = await getAllPacks();
+  return all.find(p => String(p.packId) === String(packId)) || null;
+}
+
+function canEditPack(pack, requestingAs, requestingOwnerId) {
+  if (!pack || pack.ownerType === 'official') return false;
+  return pack.ownerType === requestingAs && String(pack.ownerId) === String(requestingOwnerId);
+}
+function canArchivePack(pack, requestingAs, requestingOwnerId) {
+  return canEditPack(pack, requestingAs, requestingOwnerId);
+}
+
+async function saveTrainingPack(pack) {
+  if (!pack.ownerType || pack.ownerType === 'official') {
+    throw new Error('Custom packs must have ownerType "guardian" or "player", never "official".');
+  }
+  if (!pack.status) pack.status = 'active';
+  return DB.put('trainingPacks', pack);
+}
+
+async function archiveTrainingPack(packId, requestingAs, requestingOwnerId) {
+  const pack = await DB.get('trainingPacks', packId);
+  if (!pack) return;
+  if (!canArchivePack(pack, requestingAs, requestingOwnerId)) {
+    throw new Error('You do not have permission to archive this pack.');
+  }
+  pack.status = 'archived';
+  await DB.put('trainingPacks', pack);
+}
+
+async function duplicateTrainingPack(packId, requestingAs, requestingOwnerId) {
+  const pack = await getPackById(packId);
+  if (!pack) return;
+  const copy = {
+    ownerType: requestingAs,
+    ownerId: requestingOwnerId,
+    name: pack.name + ' ' + I18n.t('drill_duplicate_suffix'),
+    description: pack.description,
+    difficulty: pack.difficulty,
+    skillsTrained: [...(pack.skillsTrained||[])],
+    drillRefs: JSON.parse(JSON.stringify(pack.drillRefs||[])),
+    estimatedDurationMin: pack.estimatedDurationMin,
+    status: 'active',
+  };
+  return saveTrainingPack(copy);
+}
+
+// Favourites reuse the exact same drillFavourites store/functions — a pack
+// favourite is just a "drillKey" that happens to be a packId, kept in the
+// same table rather than inventing a parallel store for a near-identical
+// concept.
+async function isPackFavourited(packId, userType, userId) {
+  return isDrillFavourited('pack:'+packId, userType, userId);
+}
+async function togglePackFavourite(packId, userType, userId) {
+  return toggleDrillFavourite('pack:'+packId, userType, userId);
+}
+
+// ── PASS 4 — PACK BUILDER ────────────────────────────────────────────────────
+let _packBuilderDrillRefs = [];
+let _lastPacksViewAs = null;
+let _packBuilderEditingId = null;
+
+async function openPackBuilder(viewAs, existingPackId) {
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  _packBuilderEditingId = existingPackId || null;
+
+  let existing = null;
+  if (existingPackId) {
+    existing = await getPackById(existingPackId);
+    if (existing && !canEditPack(existing, userType, userId)) {
+      Toast.error(I18n.t('pack_err_cannot_edit'));
+      return;
+    }
+  }
+  _packBuilderDrillRefs = existing ? JSON.parse(JSON.stringify(existing.drillRefs||[])) : [];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'packBuilderOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:520px;max-height:88vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <h2 style="margin:0">${existing ? I18n.t('pack_builder_edit_title') : I18n.t('pack_builder_new_title')}</h2>
+        <button onclick="document.getElementById('packBuilderOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px" aria-label="Close">&#10005;</button>
+      </div>
+      <div class="form-grid" style="margin-top:14px">
+        <div class="form-group full"><label>${I18n.t('pack_builder_name')}</label><input id="pb-name" type="text" value="${esc(existing?.name||'')}"></div>
+        <div class="form-group full"><label>${I18n.t('pack_builder_description')}</label><textarea id="pb-description">${esc(existing?.description||'')}</textarea></div>
+        <div class="form-group"><label>${I18n.t('drill_builder_difficulty')}</label>
+          <select id="pb-difficulty">
+            ${['Easy','Medium','Hard'].map(d => `<option value="${d}" ${existing?.difficulty===d?'selected':''}>${d}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>${I18n.t('pack_builder_skills')}</label><input id="pb-skills" type="text" value="${esc((existing?.skillsTrained||[]).join(', '))}" placeholder="${I18n.t('pack_builder_skills_placeholder')}"></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted)">${I18n.t('pack_builder_drills')}</div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="openDrillLibraryPickerForPack('${viewAs}')">${I18n.t('pack_builder_add_drill')}</button>
+      </div>
+      <div id="packBuilderDrillList"></div>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px" id="packBuilderDuration"></p>
+
+      <div class="form-actions" style="margin-top:16px">
+        <button class="btn btn-primary" onclick="saveTrainingPackFromBuilder('${viewAs}')">${I18n.t('pack_builder_save')}</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('packBuilderOverlay').remove()">${I18n.t('common_cancel')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  renderPackBuilderDrillList();
+}
+
+// Reuses the existing Drill Library Picker (Pass 2) in a lightweight
+// "select for pack" mode — every drill is still reviewed via the Detail
+// Popup before being added, consistent with the app-wide principle that
+// nothing gets added anywhere without that review step.
+function openDrillLibraryPickerForPack(viewAs) {
+  _packBuilderPickerActive = true;
+  openDrillLibraryPicker(0, 'packbuilder', null);
+}
+let _packBuilderPickerActive = false;
+
+async function renderPackBuilderDrillList() {
+  const el = document.getElementById('packBuilderDrillList');
+  const durEl = document.getElementById('packBuilderDuration');
+  if (!el) return;
+  const customDrills = await getAllCustomDrills();
+  let totalDuration = 0;
+  el.innerHTML = _packBuilderDrillRefs.map((ref, i) => {
+    let name, duration;
+    if (ref.kind === 'library') {
+      const drill = getLibraryDrill(ref.key);
+      name = drill ? libDrillDisplayName(drill.key) : ref.key;
+      duration = drill?.durationMin || 0;
+    } else {
+      const custom = customDrills.find(d => String(d.drillId) === String(ref.key));
+      name = custom ? custom.name : ref.key;
+      duration = custom?.durationMin || 0;
+    }
+    totalDuration += duration;
+    return `
+      <div class="wp-row"><div class="wp-info" style="cursor:default">
+        <button type="button" onclick="moveDrillUp(_packBuilderDrillRefs,${i},renderPackBuilderDrillList)" ${i===0?'disabled':''} style="width:22px;height:18px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:9px;line-height:1;flex-shrink:0;${i===0?'opacity:.35':''}" aria-label="${I18n.t('tr_move_up')}">&#9650;</button>
+        <button type="button" onclick="moveDrillDown(_packBuilderDrillRefs,${i},renderPackBuilderDrillList)" ${i===_packBuilderDrillRefs.length-1?'disabled':''} style="width:22px;height:18px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:9px;line-height:1;flex-shrink:0;margin-right:6px;${i===_packBuilderDrillRefs.length-1?'opacity:.35':''}" aria-label="${I18n.t('tr_move_down')}">&#9660;</button>
+        <span class="wp-name">${esc(name)}</span>
+        <button type="button" class="btn btn-danger btn-sm" style="margin-left:auto" onclick="removePackBuilderDrill(${i})">${I18n.t('tr_btn_remove_drill')}</button>
+      </div></div>`;
+  }).join('') || `<p style="font-size:12px;color:var(--muted)">${I18n.t('pack_builder_no_drills')}</p>`;
+  if (durEl) durEl.textContent = I18n.t('pack_builder_estimated_duration', {min: totalDuration});
+}
+
+function removePackBuilderDrill(index) {
+  _packBuilderDrillRefs.splice(index, 1);
+  renderPackBuilderDrillList();
+}
+
+async function saveTrainingPackFromBuilder(viewAs) {
+  const name = document.getElementById('pb-name')?.value.trim();
+  if (!name) { Toast.error(I18n.t('pack_builder_err_name_required')); return; }
+  if (!_packBuilderDrillRefs.length) { Toast.error(I18n.t('pack_builder_err_no_drills')); return; }
+
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  const skillsRaw = document.getElementById('pb-skills')?.value.trim() || '';
+  const skillsTrained = skillsRaw ? skillsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  let totalDuration = 0;
+  const customDrillsForDuration = await getAllCustomDrills();
+  _packBuilderDrillRefs.forEach(ref => {
+    if (ref.kind === 'library') {
+      const drill = getLibraryDrill(ref.key);
+      totalDuration += drill?.durationMin || 0;
+    } else {
+      const custom = customDrillsForDuration.find(d => String(d.drillId) === String(ref.key));
+      totalDuration += custom?.durationMin || 0;
+    }
+  });
+
+  const pack = {
+    ownerType: userType,
+    ownerId: userId,
+    name,
+    description: document.getElementById('pb-description')?.value.trim() || '',
+    difficulty: document.getElementById('pb-difficulty')?.value || 'Easy',
+    skillsTrained,
+    drillRefs: JSON.parse(JSON.stringify(_packBuilderDrillRefs)),
+    estimatedDurationMin: totalDuration,
+    status: 'active',
+  };
+  if (_packBuilderEditingId) pack.packId = _packBuilderEditingId;
+
+  try {
+    await saveTrainingPack(pack);
+    document.getElementById('packBuilderOverlay')?.remove();
+    Toast.show(I18n.t('pack_builder_saved'));
+    if (document.getElementById('packsListPanel')) renderPacksList(_lastPacksViewAs);
+  } catch(err) {
+    Toast.error(err.message);
+  }
+}
+
+// ── PASS 4 — PACKS TAB (lightweight, embedded in the Training flow) ─────────
+// Deliberately NOT a large standalone page — a simple list with a "+ Create
+// Pack" button, opened from within the existing Training tab shell. Full
+// browsing (search/filters like the drill picker) is left for a future pass
+// if actually needed; this is enough to create, use, duplicate, and manage
+// packs for Pass 4's scope.
+async function renderPacksList(viewAs) {
+  const el = document.getElementById('packsListPanel');
+  if (!el) return;
+  _lastPacksViewAs = viewAs;
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  const packs = await getActivePacks();
+  const favEntries = await DB.getAll('drillFavourites');
+  const favPackKeys = favEntries.filter(f => f.userType===userType && String(f.userId)===String(userId) && String(f.drillKey).startsWith('pack:')).map(f => f.drillKey.replace('pack:',''));
+
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">${I18n.t('pack_tab_title')}</div>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openPackBuilder('${viewAs}', null)">${I18n.t('pack_btn_create')}</button>
+    </div>
+    ${!packs.length ? `<p style="font-size:12px;color:var(--muted)">${I18n.t('pack_tab_empty')}</p>` : `
+    <div class="who-played-list">
+      ${packs.map(p => {
+        const isFav = favPackKeys.includes(String(p.packId));
+        const canEdit = canEditPack(p, userType, userId);
+        return `
+        <div class="wp-row" style="cursor:pointer" onclick="openPackDetail('${p.packId}','${viewAs}')">
+          <div class="wp-info">
+            <span style="font-size:15px;flex-shrink:0">${isFav?'&#9733;':'&#9734;'}</span>
+            <span class="wp-name">${esc(p.name)}</span>
+            <span class="pos-pill">${p.ownerType==='official'?I18n.t('drill_owner_official'):(p.ownerType==='guardian'?I18n.t('drill_owner_guardian'):I18n.t('drill_owner_player'))}</span>
+            <span class="pos-pill" style="margin-left:auto">${(p.drillRefs||[]).length} ${I18n.t('pack_drills_suffix')}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`}
+  `;
+}
+
+async function openPackDetail(packId, viewAs) {
+  const pack = await getPackById(packId);
+  if (!pack) return;
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  const isFav = await isPackFavourited(packId, userType, userId);
+  const canEdit = canEditPack(pack, userType, userId);
+
+  const customDrills = await getAllCustomDrills();
+  const drillNames = (pack.drillRefs||[]).map(ref => {
+    if (ref.kind === 'library') { const d = getLibraryDrill(ref.key); return d ? libDrillDisplayName(d.key) : ref.key; }
+    const custom = customDrills.find(d => String(d.drillId) === String(ref.key));
+    return custom ? custom.name : ref.key;
+  });
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'packDetailOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:480px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <h2 style="margin:0">${esc(pack.name)}</h2>
+        <button onclick="document.getElementById('packDetailOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px" aria-label="Close">&#10005;</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin:8px 0 14px;flex-wrap:wrap">
+        <span class="pos-pill">${pack.ownerType==='official'?I18n.t('drill_owner_official'):(pack.ownerType==='guardian'?I18n.t('drill_owner_guardian'):I18n.t('drill_owner_player'))}</span>
+        <span class="pos-pill">${esc(pack.difficulty||'')}</span>
+        ${pack.estimatedDurationMin ? `<span class="pos-pill">${pack.estimatedDurationMin} min</span>` : ''}
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">${esc(pack.description||'')}</p>
+      ${(pack.skillsTrained||[]).length ? `<div style="margin-bottom:12px">${pack.skillsTrained.map(s=>`<span class="pos-pill" style="margin:0 4px 4px 0">${esc(s)}</span>`).join('')}</div>` : ''}
+      <div style="background:#f8f8f8;border-radius:6px;padding:10px;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--muted);margin-bottom:6px">${I18n.t('pack_drills_included')}</div>
+        ${drillNames.map(n => `<div style="font-size:12px;padding:2px 0">${esc(n)}</div>`).join('') || `<span style="font-size:11px;color:var(--muted)">—</span>`}
+      </div>
+      ${pack.ownerType==='official' ? `<button class="btn btn-secondary" style="width:100%;margin-bottom:10px" onclick="handleDuplicatePack('${packId}','${viewAs}')">${I18n.t('drill_btn_duplicate')}</button>` : ''}
+      ${canEdit ? `<div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn btn-secondary" style="flex:1" onclick="document.getElementById('packDetailOverlay').remove();openPackBuilder('${viewAs}','${packId}')">${I18n.t('drill_btn_edit')}</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="handleArchivePack('${packId}','${viewAs}')">${I18n.t('drill_btn_archive')}</button>
+      </div>` : ''}
+      <div class="form-actions" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <button class="btn btn-secondary" id="packFavBtn" onclick="handleTogglePackFavourite('${packId}','${viewAs}')">${isFav ? '&#9733; '+I18n.t('drill_btn_unfavourite') : '&#9734; '+I18n.t('drill_btn_favourite')}</button>
+        <button class="btn btn-primary" onclick="handleAddPackToSession('${packId}','${viewAs}')">${I18n.t('pack_btn_add_to_session')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function handleTogglePackFavourite(packId, viewAs) {
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  const nowFav = await togglePackFavourite(packId, userType, userId);
+  const btn = document.getElementById('packFavBtn');
+  if (btn) btn.innerHTML = nowFav ? '&#9733; '+I18n.t('drill_btn_unfavourite') : '&#9734; '+I18n.t('drill_btn_favourite');
+}
+
+async function handleDuplicatePack(packId, viewAs) {
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  await duplicateTrainingPack(packId, userType, userId);
+  document.getElementById('packDetailOverlay')?.remove();
+  Toast.show(I18n.t('drill_duplicated'));
+  if (document.getElementById('packsListPanel')) renderPacksList(viewAs);
+}
+
+async function handleArchivePack(packId, viewAs) {
+  const { userType, userId } = getCurrentDrillUser(viewAs);
+  if (!window.confirm(I18n.t('pack_confirm_archive'))) return;
+  try {
+    await archiveTrainingPack(parseInt(packId), userType, userId);
+    document.getElementById('packDetailOverlay')?.remove();
+    Toast.show(I18n.t('drill_archived'));
+    if (document.getElementById('packsListPanel')) renderPacksList(viewAs);
+  } catch(err) {
+    Toast.error(err.message);
+  }
+}
+
+// ── PASS 4 — PACK → SESSION SNAPSHOT (the critical requirement) ─────────────
+// Adding a pack to a session expands each of its drillRefs into a full,
+// independent drill entry — reusing the exact same shape a manually-added
+// drill already uses (built via the same logic addDrillFromPicker uses).
+// After this runs, the session has its OWN copy; it holds no reference to
+// the pack at all. Editing the pack later, or archiving/deleting it, can
+// never retroactively change any session that already used it — there is
+// simply no link left to follow.
+async function handleAddPackToSession(packId, viewAs) {
+  const pack = await getPackById(packId);
+  if (!pack) return;
+
+  (pack.drillRefs || []).forEach(ref => {
+    const newDrillEntry = ref.kind === 'library'
+      ? { libraryKey: ref.key, drillType: null }
+      : { customDrillId: ref.key, drillType: null };
+    _trainingFormDrills.push(newDrillEntry);
+  });
+
+  document.getElementById('packDetailOverlay')?.remove();
+  Toast.show(I18n.t('pack_added_to_session', {n: (pack.drillRefs||[]).length}));
+
+  // Refresh whichever drill-row view is actually open right now.
+  if (_trainingFormPlayerId) {
+    renderTrainingDrillRows(_trainingFormPlayerId, 'plan');
+    refreshAutoSessionName(_trainingFormPlayerId);
+  }
+}
+
+// The ONLY function that actually inserts a drill into a session's working
+// drill list — called exclusively from the detail popup's "Add to Session"
+// button, so no path in the app can add a drill without this review step
+// having happened first. rowIndex null = adding a brand new row; a number =
+// replacing an existing row's drill (the "tap row to change" flow).
+async function addDrillFromPicker(drillKey, playerId, mode, rowIndex) {
+  const isOfficial = !!getLibraryDrill(drillKey);
+
+  if (mode === 'packbuilder') {
+    // Building a pack — store a lightweight reference (kind + key), not a
+    // resolved drill. The pack owns this reference; snapshotting into an
+    // actual session only happens later, at addPackToSession time.
+    const ref = isOfficial ? { kind: 'library', key: drillKey } : { kind: 'custom', key: drillKey };
+    _packBuilderDrillRefs.push(ref);
+    document.getElementById('drillDetailOverlay')?.remove();
+    document.getElementById('drillLibraryPickerOverlay')?.remove();
+    renderPackBuilderDrillList();
+    return;
+  }
+
+  const newDrillEntry = isOfficial
+    ? { libraryKey: drillKey, drillType: null }
+    : { customDrillId: drillKey, drillType: null };
+
+  if (rowIndex === null || rowIndex === undefined) {
+    _trainingFormDrills.push(newDrillEntry);
+  } else {
+    _trainingFormDrills[rowIndex] = newDrillEntry;
+  }
+
+  document.getElementById('drillDetailOverlay')?.remove();
+  document.getElementById('drillLibraryPickerOverlay')?.remove();
+  renderTrainingDrillRows(playerId, mode);
+  if (mode === 'plan') refreshAutoSessionName(playerId);
+}
+
+// ── PASS 2 — DRILL LIBRARY PICKER ────────────────────────────────────────────
+// Replaces the old inline <select> for both adding a new drill AND changing
+// an existing row's drill — one consistent selection pattern, always
+// routing through the Detail Popup before anything is actually chosen.
+// rowIndex null = adding a new row; a number = replacing that row's drill.
+let _pickerState = { search: '', category: null, difficulty: null, equipment: null, favouritesOnly: false };
+let _lastPickerPlayerId = null, _lastPickerMode = null, _lastPickerRowIndex = null;
+
+async function openDrillLibraryPicker(playerId, mode, rowIndex) {
+  _pickerState = { search: '', category: null, difficulty: null, equipment: null, favouritesOnly: false };
+  _lastPickerPlayerId = playerId; _lastPickerMode = mode; _lastPickerRowIndex = rowIndex;
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'drillLibraryPickerOverlay';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:520px;max-height:85vh;display:flex;flex-direction:column">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <h2 style="margin:0">${I18n.t('drill_picker_title')}</h2>
+        <button onclick="document.getElementById('drillLibraryPickerOverlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--muted);line-height:1;padding:0 4px" aria-label="Close">&#10005;</button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" style="margin:10px 0 0;width:100%" onclick="openDrillBuilder(_trainingFormViewAs, null)">${I18n.t('drill_picker_create_drill')}</button>
+      <input type="text" id="drillPickerSearch" placeholder="${I18n.t('drill_picker_search_placeholder')}" style="margin:10px 0;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px" oninput="updateDrillPickerFilter('search',this.value,${playerId},'${mode}',${rowIndex ?? 'null'})">
+      <div id="drillPickerFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div id="drillPickerResults" style="overflow-y:auto;flex:1;min-height:0"></div>
+      <div style="text-align:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <a href="#" onclick="event.preventDefault();toggleLegacyDrillFallback(${playerId},'${mode}',${rowIndex ?? 'null'})" style="font-size:12px;color:var(--muted);text-decoration:underline">${I18n.t('drill_picker_legacy_link')}</a>
+        <div id="drillPickerLegacy" style="display:none;margin-top:10px"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  await renderDrillPickerFilterChips(playerId, mode, rowIndex);
+  await renderDrillLibraryResults(playerId, mode, rowIndex);
+}
+
+async function renderDrillPickerFilterChips(playerId, mode, rowIndex) {
+  const el = document.getElementById('drillPickerFilters');
+  if (!el) return;
+  const categories = [...new Set(DRILL_LIBRARY.map(d => d.category))];
+  const difficulties = [...new Set(DRILL_LIBRARY.map(d => d.difficulty))];
+
+  const chip = (label, active, onclick) =>
+    `<button type="button" onclick="${onclick}" style="font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid ${active?'var(--black)':'var(--border)'};background:${active?'var(--black)':'#fff'};color:${active?'#fff':'var(--dark)'};cursor:pointer">${esc(label)}</button>`;
+
+  el.innerHTML = `
+    ${chip(I18n.t('drill_picker_favourites_chip'), _pickerState.favouritesOnly, `toggleDrillPickerFavouritesOnly(${playerId},'${mode}',${rowIndex ?? 'null'})`)}
+    ${categories.map(c => chip(c, _pickerState.category===c, `updateDrillPickerFilter('category','${c}',${playerId},'${mode}',${rowIndex ?? 'null'})`)).join('')}
+    ${difficulties.map(d => chip(d, _pickerState.difficulty===d, `updateDrillPickerFilter('difficulty','${d}',${playerId},'${mode}',${rowIndex ?? 'null'})`)).join('')}
+  `;
+}
+
+function updateDrillPickerFilter(key, value, playerId, mode, rowIndex) {
+  // Tapping an already-active filter chip clears it (toggle behaviour);
+  // search always just sets the value directly.
+  if (key === 'search') { _pickerState.search = value; }
+  else { _pickerState[key] = _pickerState[key] === value ? null : value; }
+  renderDrillPickerFilterChips(playerId, mode, rowIndex);
+  renderDrillLibraryResults(playerId, mode, rowIndex);
+}
+
+function toggleDrillPickerFavouritesOnly(playerId, mode, rowIndex) {
+  _pickerState.favouritesOnly = !_pickerState.favouritesOnly;
+  renderDrillPickerFilterChips(playerId, mode, rowIndex);
+  renderDrillLibraryResults(playerId, mode, rowIndex);
+}
+
+async function renderDrillLibraryResults(playerId, mode, rowIndex) {
+  const el = document.getElementById('drillPickerResults');
+  if (!el) return;
+  const customDrills = await getActiveCustomDrills();
+  const { userType, userId } = getCurrentDrillUser(mode === 'plan' || mode === 'perform' ? _trainingFormViewAs : _trainingFormViewAs);
+  const favKeys = await getFavouriteDrillKeys(userType, userId);
+
+  let results = [...DRILL_LIBRARY, ...customDrills];
+
+  if (_pickerState.search.trim()) {
+    const q = _pickerState.search.trim().toLowerCase();
+    results = results.filter(d => {
+      const name = d.ownerType === 'official' ? libDrillDisplayName(d.key) : (d.name || '');
+      return name.toLowerCase().includes(q);
+    });
+  }
+  if (_pickerState.category) results = results.filter(d => d.category === _pickerState.category);
+  if (_pickerState.difficulty) results = results.filter(d => d.difficulty === _pickerState.difficulty);
+  if (_pickerState.equipment) results = results.filter(d => (d.equipment||'').includes(_pickerState.equipment));
+  if (_pickerState.favouritesOnly) results = results.filter(d => favKeys.includes(d.key || String(d.drillId)));
+
+  el.innerHTML = results.length ? results.map(d => {
+    const drillKey = d.key || String(d.drillId);
+    const name = d.ownerType === 'official' ? libDrillDisplayName(d.key) : (esc(d.name)||'');
+    const isFav = favKeys.includes(drillKey);
+    return `
+      <div class="wp-row" style="cursor:pointer" onclick="document.getElementById('drillLibraryPickerOverlay').remove();openDrillDetailPopup('${drillKey}',${playerId},'${mode}',${rowIndex ?? 'null'})">
+        <div class="wp-info">
+          <span style="font-size:16px;flex-shrink:0">${isFav?'&#9733;':'&#9734;'}</span>
+          <span class="wp-name">${name}</span>
+          ${drillOwnershipBadge(d)}
+          <span class="pos-pill" style="margin-left:auto">${d.durationMin||0} min</span>
+        </div>
+      </div>`;
+  }).join('') : `<div class="empty"><strong>${I18n.t('drill_picker_no_results')}</strong></div>`;
+}
+
+// Legacy generic drills (DRILL_TYPES) — kept reachable but deliberately
+// separate from the main card grid, since they have no real category,
+// difficulty, or equipment metadata and forcing placeholder values into
+// the cards above would present fabricated data as if it were real.
+// Flagged for a real decision in a later pass once/if these are properly
+// enriched or retired.
+function toggleLegacyDrillFallback(playerId, mode, rowIndex) {
+  const el = document.getElementById('drillPickerLegacy');
+  if (!el) return;
+  const showing = el.style.display !== 'none';
+  if (showing) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `
+    <select style="width:100%;padding:8px" onchange="addLegacyDrillFromPicker(this.value,${playerId},'${mode}',${rowIndex ?? 'null'})">
+      <option value="">${I18n.t('drill_picker_legacy_select')}</option>
+      ${DRILL_TYPES.map(d => `<option value="${d.key}">${drillTypeLabel(d.key)}</option>`).join('')}
+    </select>`;
+}
+
+function addLegacyDrillFromPicker(drillTypeKey, playerId, mode, rowIndex) {
+  if (!drillTypeKey) return;
+  const newDrillEntry = { drillType: drillTypeKey, libraryKey: null };
+  if (rowIndex === null || rowIndex === undefined) {
+    _trainingFormDrills.push(newDrillEntry);
+  } else {
+    _trainingFormDrills[rowIndex] = newDrillEntry;
+  }
+  document.getElementById('drillLibraryPickerOverlay')?.remove();
+  renderTrainingDrillRows(playerId, mode);
+  if (mode === 'plan') refreshAutoSessionName(playerId);
+}
+
+// ── PASS 5 — COMPLETION STATES ───────────────────────────────────────────────
+// Five states replace the old skipped:true/false boolean:
+//   not_started | completed | partial | skipped | missed
+// completed and partial allow KPI entry; skipped and missed disable it.
+// not_started is the default for a drill nobody has touched yet.
+//
+// Backward compatibility: old records never had completionStatus at all,
+// only skipped. This function computes the right status AT READ TIME,
+// every time, without ever writing anything back to the record — an old
+// session opened today looks correct immediately, with zero migration
+// step and zero risk of corrupting historical data.
+function getDrillCompletionStatus(drill) {
+  if (drill.completionStatus) return drill.completionStatus; // Pass 5+ record, already explicit
+  if (drill.skipped === true) return 'skipped';               // legacy: skipped:true → skipped
+  const hasValues = Object.keys(drill).some(k =>
+    !['libraryKey','drillType','customDrillId','skipped','completionStatus'].includes(k) &&
+    drill[k] !== undefined && drill[k] !== null && drill[k] !== '' && drill[k] !== 0
+  );
+  return hasValues ? 'completed' : 'not_started'; // legacy: skipped:false, has real values → completed; otherwise → not_started
+}
+
+function isKpiEntryEnabled(status) {
+  return status === 'completed' || status === 'partial' || status === 'not_started';
+}
+
+// Per your explicit instruction: changing status to skipped/missed does
+// NOT auto-clear any KPI values that already exist on the record. Inputs
+// are disabled for further edits, but old data is only cleared if the
+// person explicitly changes the status AND saves again with fresh (zeroed)
+// values entered through the normal edit flow — never as an automatic
+// side effect of just picking a status.
+function updateDrillCompletionStatus(drillsArray, index, newStatus) {
+  drillsArray[index].completionStatus = newStatus;
+  // Keep the legacy field in sync for anything not yet migrated to read
+  // completionStatus, but never rely on it as the source of truth going
+  // forward — completionStatus always wins per getDrillCompletionStatus.
+  drillsArray[index].skipped = (newStatus === 'skipped' || newStatus === 'missed');
+}
+
+function moveDrillUp(drillsArray, index, rerenderFn) {
+  if (index <= 0) return;
+  [drillsArray[index-1], drillsArray[index]] = [drillsArray[index], drillsArray[index-1]];
+  rerenderFn();
+}
+function moveDrillDown(drillsArray, index, rerenderFn) {
+  if (index >= drillsArray.length - 1) return;
+  [drillsArray[index], drillsArray[index+1]] = [drillsArray[index+1], drillsArray[index]];
+  rerenderFn();
+}
+
 // Builds the drill rows every NEW training session starts with — currently
 // the warm-up and sit-ups/push-ups block, both pre-filled with their usual
-// default numbers and marked not-skipped. Fully editable afterward: change
-// the numbers, or flag "not done" to zero it out while keeping the row
-// visible in history (see the skipped flag below) — never silently deleted.
+// default numbers, status not_started until actually performed.
 function getDefaultSessionDrills() {
   return DRILL_LIBRARY.filter(d => d.isDefault).map(d => ({
     libraryKey: d.key,
     drillType: null,
-    skipped: false,
+    completionStatus: 'not_started',
     ...d.defaultValues,
   }));
 }
@@ -5352,6 +6602,10 @@ async function renderPlayerTraining(playerId, viewAs) {
 
     <div id="trainingFormPanel-${playerId}" class="form-panel panel-hidden" style="margin-bottom:16px"></div>
 
+    <div class="card" style="margin-bottom:14px">
+      <div id="packsListPanel"></div>
+    </div>
+
     ${progressKeys.length ? `
     <div class="card" style="margin-bottom:14px">
       <div class="card-title">${I18n.t('tr_progress_title')}</div>
@@ -5366,7 +6620,7 @@ async function renderPlayerTraining(playerId, viewAs) {
           </div>
           <div style="display:flex;gap:14px;flex-wrap:wrap">
             ${fieldEntries.map(([fk,sum]) => {
-              const fLabel = t.isLibrary ? (getLibraryDrill(drillKey)?.scoreFields.find(f=>f.key===fk)?.label || fk) : drillFieldLabel(drillKey,fk);
+              const fLabel = t.isLibrary ? (getLibraryDrill(drillKey)?.kpiFields.find(f=>f.key===fk)?.label || fk) : drillFieldLabel(drillKey,fk);
               return `<div style="font-size:11px;color:var(--muted)">${esc(fLabel)}: <strong style="color:var(--dark)">${sum}</strong></div>`;
             }).join('')}
           </div>
@@ -5387,6 +6641,7 @@ async function renderPlayerTraining(playerId, viewAs) {
         </div>`).join('')}
     </div>`}
   `;
+  await renderPacksList(viewAs);
 }
 
 // ── CREATE / EDIT FORM — dynamic drill rows ──────────────────────────────────
@@ -5425,7 +6680,7 @@ async function openTrainingForm(playerId, viewAs, existingSessionId) {
     <div style="margin:12px 0">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">${I18n.t('tr_lbl_drills')}</label>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="addTrainingDrillRow(${playerId})">${I18n.t('tr_btn_add_drill')}</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="openDrillLibraryPicker(${playerId},'plan',null)">${I18n.t('tr_btn_add_drill')}</button>
       </div>
       <div id="trainingDrillRows-${playerId}"></div>
     </div>
@@ -5479,6 +6734,10 @@ function refreshAutoSessionName(playerId) {
   _lastAutoTitle = newAutoTitle;
 }
 
+// SUPERSEDED as of Pass 2 — adding a drill now always goes through
+// openDrillLibraryPicker() → the Detail Popup → addDrillFromPicker(), so
+// every addition is reviewed first. Kept here, unused, only in case a
+// rollback of the picker flow is ever needed.
 function addTrainingDrillRow(playerId, mode = 'plan') {
   _trainingFormDrills.push({ drillType: DRILL_TYPES[0].key });
   renderTrainingDrillRows(playerId, mode);
@@ -5502,24 +6761,6 @@ function updateTrainingDrillField(index, fieldKey, value, isText) {
   _trainingFormDrills[index][fieldKey] = isText ? value : (parseFloat(value)||0);
 }
 
-// Marks a drill as not performed this session. Values are zeroed (so totals
-// and progress views aren't inflated by a drill that didn't happen) but the
-// row itself stays in the session and its history — never silently deleted
-// — so there's an honest, visible record of what was and wasn't done, and
-// how often, over time. Unchecking restores it to normal editable numeric
-// entry starting from zero. Only relevant in 'perform' mode.
-function toggleTrainingDrillSkipped(playerId, index, skipped, mode = 'perform') {
-  const drill = _trainingFormDrills[index];
-  drill.skipped = skipped;
-  if (skipped) {
-    const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
-    const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const fields = libDrill ? libDrill.scoreFields : (def ? def.fields : []);
-    fields.forEach(f => { if (!f.isText) drill[f.key] = 0; });
-  }
-  renderTrainingDrillRows(playerId, mode);
-}
-
 // mode 'plan' = creation form: just pick which drills are part of the
 // session, no results entry, no Not Done toggle — that belongs to the
 // moment the drill actually happens, not when it's being planned.
@@ -5535,29 +6776,33 @@ function renderTrainingDrillRows(playerId, mode = 'plan') {
   el.innerHTML = _trainingFormDrills.map((drill, i) => {
     const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
     const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const scoreFields = libDrill ? libDrill.scoreFields : (def ? def.fields : []);
+    const scoreFields = libDrill ? libDrill.kpiFields : (def ? def.fields : []);
+    const rowLabel = libDrill ? libDrillDisplayName(libDrill.key) : (def ? drillTypeLabel(def.key) : I18n.t('drill_picker_no_drill_selected'));
+    const status = getDrillCompletionStatus(drill);
+    const entryEnabled = isKpiEntryEnabled(status);
+    const isDisabledLook = status === 'skipped' || status === 'missed';
 
     return `
-      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${drill.skipped?'background:#faf5f0':''}">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-          <select style="flex:1;min-width:0;max-width:100%;box-sizing:border-box" onchange="updateTrainingDrillSelection(${playerId},${i},this.value,'${mode}')" ${drill.skipped?'disabled':''}>
-            <optgroup label="${I18n.t('tr_drill_library_group')}">
-              ${categories.map(cat => DRILL_LIBRARY.filter(d=>d.category===cat).map(d =>
-                `<option value="lib:${d.key}" ${libDrill?.key===d.key?'selected':''}>${esc(libDrillDisplayName(d.key))} (${esc(cat)})</option>`
-              ).join('')).join('')}
-            </optgroup>
-            <optgroup label="${I18n.t('tr_drill_generic_group')}">
-              ${DRILL_TYPES.map(d => `<option value="gen:${d.key}" ${!libDrill && d.key===drill.drillType?'selected':''}>${drillTypeLabel(d.key)}</option>`).join('')}
-            </optgroup>
-          </select>
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${isDisabledLook?'background:#faf5f0':''}">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+            <button type="button" onclick="moveDrillUp(_trainingFormDrills,${i},()=>renderTrainingDrillRows(${playerId},'${mode}'))" ${i===0?'disabled':''} style="width:24px;height:20px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:10px;line-height:1;${i===0?'opacity:.35':''}" aria-label="${I18n.t('tr_move_up')}">&#9650;</button>
+            <button type="button" onclick="moveDrillDown(_trainingFormDrills,${i},()=>renderTrainingDrillRows(${playerId},'${mode}'))" ${i===_trainingFormDrills.length-1?'disabled':''} style="width:24px;height:20px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:10px;line-height:1;${i===_trainingFormDrills.length-1?'opacity:.35':''}" aria-label="${I18n.t('tr_move_down')}">&#9660;</button>
+          </div>
+          <button type="button" style="flex:1;min-width:0;text-align:left;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px" onclick="openDrillLibraryPicker(${playerId},'${mode}',${i})" ${isDisabledLook?'disabled':''}>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rowLabel)}</span>
+            <span style="font-size:10px;color:var(--muted);flex-shrink:0">${I18n.t('drill_btn_change')}</span>
+          </button>
           <button type="button" class="btn btn-danger btn-sm" style="flex-shrink:0" onclick="removeTrainingDrillRow(${playerId},${i},'${mode}')">${I18n.t('tr_btn_remove_drill')}</button>
         </div>
 
         ${mode==='perform' ? `
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;cursor:pointer;color:${drill.skipped?'#b26a2a':'var(--muted)'}">
-          <input type="checkbox" ${drill.skipped?'checked':''} onchange="toggleTrainingDrillSkipped(${playerId},${i},this.checked,'${mode}')">
-          ${I18n.t('tr_drill_not_done')}
-        </label>` : ''}
+        <div style="margin-bottom:8px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${I18n.t('tr_completion_status')}</label>
+          <select onchange="handleDrillStatusChange(${playerId},${i},this.value,'${mode}')" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+            ${['not_started','completed','partial','skipped','missed'].map(s => `<option value="${s}" ${status===s?'selected':''}>${I18n.t('tr_status_'+s)}</option>`).join('')}
+          </select>
+        </div>` : ''}
 
         ${libDrill ? `
         <div style="background:#f8f8f8;border-radius:4px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--dark)">
@@ -5574,12 +6819,15 @@ function renderTrainingDrillRows(playerId, mode = 'plan') {
             const fieldKey = f.key;
             const fieldLabel = libDrill ? f.label : drillFieldLabel(def.key, f.key);
             const isText = !libDrill && f.isText;
+            // Per Pass 5 clarification: existing values are shown as-is even
+            // when entry is disabled — never auto-zeroed just by viewing a
+            // skipped/missed drill. Only an explicit edit+save changes data.
             return `
             <div>
               <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
               ${isText
-                ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${drill.skipped?'disabled':''}>`
-                : `<input type="number" min="0" value="${drill.skipped?0:(drill[fieldKey]||0)}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${drill.skipped?'disabled':''}>`}
+                ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`
+                : `<input type="number" min="0" value="${drill[fieldKey]??0}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`}
             </div>`;
           }).join('')}
         </div>` : ''}
@@ -5587,8 +6835,15 @@ function renderTrainingDrillRows(playerId, mode = 'plan') {
   }).join('') || `<p style="font-size:12px;color:var(--muted)">—</p>`;
 }
 
+function handleDrillStatusChange(playerId, index, newStatus, mode) {
+  updateDrillCompletionStatus(_trainingFormDrills, index, newStatus);
+  renderTrainingDrillRows(playerId, mode);
+}
+
 // "lib:wallPassing100" or "gen:juggling" — encodes which list the selection
 // came from, since library and generic drills have different shapes.
+// SUPERSEDED as of Pass 2 — see addTrainingDrillRow note above; row-level
+// drill changes now go through the same picker/popup review flow.
 function updateTrainingDrillSelection(playerId, index, value, mode = 'plan') {
   const [kind, key] = value.split(':');
   if (kind === 'lib') {
@@ -5664,11 +6919,13 @@ async function openTrainingViewer(sessionId, viewAs) {
         const libDrill = d.libraryKey ? getLibraryDrill(d.libraryKey) : null;
         const def = !libDrill ? DRILL_TYPES.find(dt => dt.key === d.drillType) : null;
         const label = libDrill ? libDrillDisplayName(d.libraryKey) : drillTypeLabel(d.drillType);
-        const fields = libDrill ? libDrill.scoreFields : (def?.fields || []);
-        return `<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${d.skipped?'background:#faf5f0':''}">
+        const fields = libDrill ? libDrill.kpiFields : (def?.fields || []);
+        const status = getDrillCompletionStatus(d);
+        const isDisabledLook = status === 'skipped' || status === 'missed';
+        return `<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${isDisabledLook?'background:#faf5f0':''}">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
             <span style="font-size:12px;font-weight:700">${esc(label)}</span>
-            ${d.skipped?`<span class="pos-pill" style="background:#f0d9c0;color:#8a5a20">${I18n.t('tr_drill_not_done')}</span>`:''}
+            <span class="pos-pill" style="${isDisabledLook?'background:#f0d9c0;color:#8a5a20':''}">${I18n.t('tr_status_'+status)}</span>
           </div>
           <div style="display:flex;gap:14px;flex-wrap:wrap">
             ${fields.map(f => {
@@ -5732,27 +6989,41 @@ function renderTrainingCompletionRows() {
   el.innerHTML = _trainingFormDrills.map((drill, i) => {
     const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
     const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const scoreFields = libDrill ? libDrill.scoreFields : (def ? def.fields : []);
+    const scoreFields = libDrill ? libDrill.kpiFields : (def ? def.fields : []);
     const label = libDrill ? libDrillDisplayName(drill.libraryKey) : drillTypeLabel(drill.drillType);
+    const status = getDrillCompletionStatus(drill);
+    const entryEnabled = isKpiEntryEnabled(status);
+    const isDisabledLook = status === 'skipped' || status === 'missed';
 
     return `
-      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${drill.skipped?'background:#faf5f0':''}">
-        <div style="font-size:13px;font-weight:700;margin-bottom:8px">${esc(label)}</div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:8px;cursor:pointer;color:${drill.skipped?'#b26a2a':'var(--muted)'}">
-          <input type="checkbox" ${drill.skipped?'checked':''} onchange="toggleTrainingCompletionSkipped(${i},this.checked)">
-          ${I18n.t('tr_drill_not_done')}
-        </label>
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${isDisabledLook?'background:#faf5f0':''}">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+            <button type="button" onclick="moveDrillUp(_trainingFormDrills,${i},renderTrainingCompletionRows)" ${i===0?'disabled':''} style="width:24px;height:20px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:10px;line-height:1;${i===0?'opacity:.35':''}" aria-label="${I18n.t('tr_move_up')}">&#9650;</button>
+            <button type="button" onclick="moveDrillDown(_trainingFormDrills,${i},renderTrainingCompletionRows)" ${i===_trainingFormDrills.length-1?'disabled':''} style="width:24px;height:20px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-size:10px;line-height:1;${i===_trainingFormDrills.length-1?'opacity:.35':''}" aria-label="${I18n.t('tr_move_down')}">&#9660;</button>
+          </div>
+          <div style="font-size:13px;font-weight:700;flex:1">${esc(label)}</div>
+        </div>
+        <div style="margin-bottom:8px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${I18n.t('tr_completion_status')}</label>
+          <select onchange="handleCompletionStatusChange(${i},this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+            ${['not_started','completed','partial','skipped','missed'].map(s => `<option value="${s}" ${status===s?'selected':''}>${I18n.t('tr_status_'+s)}</option>`).join('')}
+          </select>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
           ${scoreFields.map(f => {
             const fieldKey = f.key;
             const fieldLabel = libDrill ? f.label : drillFieldLabel(drill.drillType, f.key);
             const isText = !libDrill && f.isText;
+            // Existing values stay visible even when entry is disabled —
+            // never auto-zeroed just by changing status. Only cleared if
+            // the person explicitly edits and saves with new values.
             return `
             <div>
               <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
               ${isText
-                ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true);" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${drill.skipped?'disabled':''} onchange="renderTrainingCompletionRows()">`
-                : `<input type="number" min="0" value="${drill.skipped?0:(drill[fieldKey]||0)}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${drill.skipped?'disabled':''}>`}
+                ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true);" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''} onchange="renderTrainingCompletionRows()">`
+                : `<input type="number" min="0" value="${drill[fieldKey]??0}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`}
             </div>`;
           }).join('')}
         </div>
@@ -5760,15 +7031,8 @@ function renderTrainingCompletionRows() {
   }).join('') || `<p style="font-size:12px;color:var(--muted)">${I18n.t('tr_progress_empty')}</p>`;
 }
 
-function toggleTrainingCompletionSkipped(index, skipped) {
-  const drill = _trainingFormDrills[index];
-  drill.skipped = skipped;
-  if (skipped) {
-    const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
-    const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const fields = libDrill ? libDrill.scoreFields : (def ? def.fields : []);
-    fields.forEach(f => { if (!f.isText) drill[f.key] = 0; });
-  }
+function handleCompletionStatusChange(index, newStatus) {
+  updateDrillCompletionStatus(_trainingFormDrills, index, newStatus);
   renderTrainingCompletionRows();
 }
 
@@ -6536,7 +7800,7 @@ async function handleSyncDownload() {
 // DB PUT WRAPPER — marks records as modified for sync
 // ══════════════════════════════════════════════════════════════════════════════
 const _origPut = DB.put.bind(DB);
-const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats','events','goalEvents','injuries','trainingSessions']);
+const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats','events','goalEvents','injuries','trainingSessions','customDrills','drillFavourites','trainingPacks']);
 
 DB.put = async function(store, obj) {
   if (SYNC_STORES_SET.has(store) && obj) {
@@ -8369,6 +9633,14 @@ const Sync = (() => {
       clubHistory: 'club_history',
       globalPlayers: 'global_players',
       opponents: 'opponents',
+      playerGameStats: 'player_game_stats',
+      events: 'events',
+      goalEvents: 'goal_events',
+      injuries: 'injuries',
+      trainingSessions: 'training_sessions',
+      customDrills: 'custom_drills',
+      drillFavourites: 'drill_favourites',
+      trainingPacks: 'training_packs',
     };
     return map[store] || store;
   }
@@ -8636,7 +9908,13 @@ const Sync = (() => {
   }
 
   function getKey(store) {
-    const keys = { seasons:'seasonId', players:'playerId', games:'gameId', gamePlayers:'gamePlayerId', achievements:'achievementId', clubHistory:'clubHistoryId', globalPlayers:'globalPlayerId', opponents:'opponentId' };
+    const keys = {
+      seasons:'seasonId', players:'playerId', games:'gameId', gamePlayers:'gamePlayerId',
+      achievements:'achievementId', clubHistory:'clubHistoryId', globalPlayers:'globalPlayerId', opponents:'opponentId',
+      playerGameStats:'pgsId', events:'eventId', goalEvents:'goalEventId', injuries:'injuryId',
+      trainingSessions:'trainingSessionId', customDrills:'drillId', drillFavourites:'favouriteId',
+      trainingPacks:'packId',
+    };
     return keys[store] || 'id';
   }
 
@@ -9847,7 +11125,7 @@ async function init() {
     // If a store is missing, the IndexedDB upgrade didn't run (version mismatch
     // or interrupted upgrade). Force a clean reopen rather than running silently
     // broken for the rest of the session.
-    const requiredStores = ['appMeta','seasons','players','games','gamePlayers','goalEvents','events','playerGameStats','achievements','clubHistory','injuries','opponents','trainingSessions'];
+    const requiredStores = ['appMeta','seasons','players','games','gamePlayers','goalEvents','events','playerGameStats','achievements','clubHistory','injuries','opponents','trainingSessions','customDrills','drillFavourites','trainingPacks'];
     const missing = requiredStores.filter(s => !DB.hasStore(s));
     if (missing.length) {
       console.error('[init] Missing IndexedDB stores after open:', missing);
