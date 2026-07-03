@@ -2148,6 +2148,10 @@ const TR = {
     tr_completion_status:'Status',
     tr_move_up:'Move up', tr_move_down:'Move down',
     tr_new_personal_best:'New Personal Best! {drill} — {field}: {value}',
+    tr_target_label:'Set a Target (optional)',
+    tr_target_optional_placeholder:'Optional',
+    tr_target_short:'Target',
+    tr_target_hit:'Target hit! {drill} — {field}: {value}',
     tr_created_by_player:'Self-created', tr_created_by_guardian:'Assigned by guardian',
     tr_empty_title:'No training sessions yet',
     tr_empty_desc_guardian:'Create one for {name}, or wait for them to log their own.',
@@ -3041,6 +3045,10 @@ const TR = {
     tr_completion_status:'Estado',
     tr_move_up:'Mover para cima', tr_move_down:'Mover para baixo',
     tr_new_personal_best:'Novo Recorde Pessoal! {drill} — {field}: {value}',
+    tr_target_label:'Definir um Objetivo (opcional)',
+    tr_target_optional_placeholder:'Opcional',
+    tr_target_short:'Objetivo',
+    tr_target_hit:'Objetivo alcançado! {drill} — {field}: {value}',
     tr_created_by_player:'Criada por ele(a)', tr_created_by_guardian:'Atribuída pelo encarregado',
     tr_empty_title:'Ainda sem sessões de treino',
     tr_empty_desc_guardian:'Crie uma para {name}, ou espere que ele(a) registe a sua própria.',
@@ -6832,6 +6840,25 @@ function updateTrainingDrillField(index, fieldKey, value, isText) {
   _trainingFormDrills[index][fieldKey] = isText ? value : (parseFloat(value)||0);
 }
 
+// ── PHASE 3 — optional per-session targets ───────────────────────────────────
+// Stored under a separate `target` object on the drill entry, e.g.
+// { situps: 25 } — never mixed into the actual result fields, so this
+// can never collide with an existing KPI key, never affects Personal Best
+// (which only ever reads the real result fields), and is fully backward
+// compatible: a drill entry with no `target` property behaves exactly as
+// it always has, since every check below treats an absent target as
+// "no target set," not zero.
+function updateTrainingDrillTarget(index, fieldKey, value) {
+  const drill = _trainingFormDrills[index];
+  if (!drill.target) drill.target = {};
+  const trimmed = String(value).trim();
+  if (trimmed === '') {
+    delete drill.target[fieldKey]; // clearing the input removes the target entirely, not sets it to 0
+  } else {
+    drill.target[fieldKey] = parseFloat(trimmed) || 0;
+  }
+}
+
 // ── PHASE 2 — counters/steppers instead of typing ────────────────────────────
 // [-] value [+] per field, avoiding the keyboard for the common case of
 // small adjustments. Typing directly into the number is still possible
@@ -6916,6 +6943,23 @@ async function renderTrainingDrillRows(playerId, mode = 'plan') {
           <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_coaching_points')}:</strong> ${esc(detailDrill.coachingPoints)}</div>
           <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_progression')}:</strong> ${esc(detailDrill.progression)}</div>
           <div style="color:var(--muted)">${I18n.t('tr_drill_meta_line', {duration: detailDrill.durationMin, difficulty: detailDrill.difficulty, equipment: detailDrill.equipment})}</div>
+        </div>` : ''}
+
+        ${mode==='plan' && scoreFields.some(f => ['number','time','distance','percentage'].includes(f.type) || (resolved.kind==='generic' && !f.isText)) ? `
+        <div style="margin-bottom:8px">
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">${I18n.t('tr_target_label')}</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+            ${scoreFields.filter(f => ['number','time','distance','percentage'].includes(f.type) || (resolved.kind==='generic' && !f.isText)).map(f => {
+              const fieldKey = f.key;
+              const fieldLabel = (libDrill || customDrill) ? f.label : drillFieldLabel(def.key, f.key);
+              const targetValue = drill.target?.[fieldKey];
+              return `
+              <div>
+                <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
+                <input type="number" min="0" placeholder="${I18n.t('tr_target_optional_placeholder')}" value="${targetValue??''}" oninput="updateTrainingDrillTarget(${i},'${fieldKey}',this.value)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px">
+              </div>`;
+            }).join('')}
+          </div>
         </div>` : ''}
 
         ${mode==='perform' ? `
@@ -7116,12 +7160,13 @@ async function renderTrainingCompletionRows() {
             const fieldKey = f.key;
             const fieldLabel = (libDrill || customDrill) ? f.label : drillFieldLabel(drill.drillType, f.key);
             const isText = resolved.kind === 'generic' && f.isText;
+            const target = drill.target?.[fieldKey];
             // Existing values stay visible even when entry is disabled —
             // never auto-zeroed just by changing status. Only cleared if
             // the person explicitly edits and saves with new values.
             return `
             <div>
-              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
+              <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}${(target!==undefined && !isText) ? ` <span style="color:#8a6d1a">(${I18n.t('tr_target_short')}: ${target})</span>` : ''}</label>
               ${isText
                 ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true);" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''} onchange="renderTrainingCompletionRows()">`
                 : renderKpiStepper(drill[fieldKey], `stepTrainingDrillField(${i},'${fieldKey}',-1,renderTrainingCompletionRows)`, `stepTrainingDrillField(${i},'${fieldKey}',1,renderTrainingCompletionRows)`, `updateTrainingDrillField(${i},'${fieldKey}',this.value,false)`, !entryEnabled)}
@@ -7166,7 +7211,16 @@ async function saveTrainingCompletion() {
   // Now recompute and compare — celebrate the first genuine improvement
   // found (one celebration per save keeps this feeling special, not noisy,
   // even if several fields improved at once).
-  await celebrateAnyNewPersonalBests(session, previousBests);
+  const pbCelebrated = await celebrateAnyNewPersonalBests(session, previousBests);
+
+  // ── PHASE 3 — target celebration ─────────────────────────────────────────
+  // Deliberately separate from Personal Best: different data (a one-off
+  // per-session target, not historical best), different message, and only
+  // shown if the PB toast didn't already fire this save — avoids stacking
+  // two celebration toasts on top of each other for the same save.
+  if (!pbCelebrated) {
+    await celebrateAnyTargetsHit(session);
+  }
 
   await renderPlayerTraining(session.playerId, _trainingCompletionViewAs);
 }
@@ -7196,10 +7250,42 @@ async function celebrateAnyNewPersonalBests(session, previousBests) {
       if (improved) {
         const drillLabel = drillResolutionLabel(resolved);
         Toast.show(`🏆 ${I18n.t('tr_new_personal_best', {drill: drillLabel, field: f.label, value: formatKpiValue(f, newValue)})}`);
-        return; // one celebration per save — see comment above
+        return true; // one celebration per save — see comment above
       }
     }
   }
+  return false;
+}
+
+// ── PHASE 3 — target-hit celebration ─────────────────────────────────────────
+// Entirely separate from Personal Best: reads only the per-session `target`
+// object set at planning time, compares it to the actual saved result, and
+// celebrates the first field that met or beat its target. Uses goalDirection
+// the same way PB does (lower is better for e.g. a sprint time), so "hit
+// the target" means the right direction, not just "value >= target" blindly.
+async function celebrateAnyTargetsHit(session) {
+  const customDrillsList = await getAllCustomDrills();
+  for (const drill of session.drills) {
+    if (!drill.target) continue;
+    const status = getDrillCompletionStatus(drill);
+    if (!isKpiEntryEnabled(status) || status === 'not_started') continue;
+
+    const resolved = resolveSessionDrill(drill, customDrillsList);
+    const kpiFields = resolved.fields || [];
+    for (const f of kpiFields) {
+      const target = drill.target[f.key];
+      if (target === undefined || target === null) continue;
+      const newValue = parseFloat(drill[f.key]);
+      if (isNaN(newValue)) continue;
+      const hit = f.goalDirection === 'lower' ? newValue <= target : newValue >= target;
+      if (hit) {
+        const drillLabel = drillResolutionLabel(resolved);
+        Toast.show(`🎯 ${I18n.t('tr_target_hit', {drill: drillLabel, field: f.label, value: formatKpiValue(f, newValue)})}`);
+        return true; // one celebration per save, same reasoning as Personal Best
+      }
+    }
+  }
+  return false;
 }
 
 function confirmDeleteTrainingSession(sessionId, viewAs) {
@@ -11615,9 +11701,16 @@ async function validateImportPlayers(rows) {
   });
 }
 
+// NOTE: this definition is currently unreachable — a second function with
+// the exact same name is declared later in the file (line ~11772+), and
+// that later declaration is what actually runs at the one call site. Not
+// removed here since that wasn't part of the requested change; flagging
+// it plainly so it's a known, visible fact rather than a silent trap for
+// a future edit made against the wrong copy.
 async function validateImportGames(rows) {
   if (!State.currentSeasonId) throw new Error(I18n.t('import_no_season'));
   const existing = await DB.getAll('games', 'seasonId', State.currentSeasonId);
+  const VALID_HOME_AWAY_LEGACY = ['Home', 'Away', 'Neutral'];
   return rows.map((row, i) => {
     const date = (row['Date'] || '').trim();
     const opp = (row['Opponent'] || '').trim();
@@ -11632,11 +11725,13 @@ async function validateImportGames(rows) {
       const dup = existing.find(g => g.date === date && g.opponent.toLowerCase() === opp.toLowerCase());
       if (dup) { status = 'skip'; reason = I18n.t('import_dup_game'); }
     }
+    const haRawLegacy = (row['Home/Away'] || 'Home').trim();
+    const haMatchLegacy = VALID_HOME_AWAY_LEGACY.find(v => v.toLowerCase() === haRawLegacy.toLowerCase());
     return {
       rowNum: i + 2, status, reason,
       data: {
         date, opponent: opp,
-        homeAway: (row['Home/Away'] || 'Home').trim(),
+        homeAway: haMatchLegacy || 'Home',
         competitionType: (row['Competition Type'] || 'League').trim(),
         competitionName: (row['Competition Name'] || '').trim() || null,
         venue: (row['Venue'] || '').trim() || null,
@@ -11771,10 +11866,17 @@ async function validateImportPlayers(rows) {
 
 async function validateImportGames(rows) {
   const existing = await DB.getAll('games', 'seasonId', State.currentSeasonId);
+  const VALID_HOME_AWAY = ['Home', 'Away', 'Neutral'];
   return rows.map(r => {
     const date = (r.date||'').trim();
     const opp = (r.opponent||r.opponentname||r['opponent name']||'').trim();
-    const ha = (r.homeaway||r['home/away']||r.venue||'Home').trim();
+    const haRaw = (r.homeaway||r['home/away']||r.venue||'Home').trim();
+    // Case-insensitive match against the 3 allowed values (Home/Away/
+    // Neutral) so "neutral" or "AWAY" in a CSV still resolves correctly,
+    // but anything else (a typo, a stray value) is caught here rather
+    // than silently stored as-is, which is what happened before this fix.
+    const haMatch = VALID_HOME_AWAY.find(v => v.toLowerCase() === haRaw.toLowerCase());
+    const ha = haMatch || 'Home';
     const compType = (r.competitiontype||r['competition type']||'League').trim();
     const compName = (r.competitionname||r['competition name']||'').trim();
     const venue = (r.venue||r.ground||'').trim();
@@ -11785,6 +11887,22 @@ async function validateImportGames(rows) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { status:'err', reason:'Date must be YYYY-MM-DD', display:[date,opp,ha] };
     const dup = existing.find(g => g.date===date && (g.opponent||'').toLowerCase()===opp.toLowerCase());
     if (dup) return { status:'skip', reason:'Duplicate (same date + opponent)', display:[date,opp,ha] };
+    // Neutral is a real, valid value (tournament matches at a neutral
+    // venue) — this only warns when the CSV had something that matched
+    // NONE of Home/Away/Neutral, defaulting to Home but flagging it so
+    // it's not silently wrong.
+    if (haRaw && !haMatch) {
+      return {
+        status:'warn', reason:`"${haRaw}" is not a valid Home/Away value — defaulted to Home. Valid values: Home, Away, Neutral.`, display:[date,opp,ha],
+        data: {
+          seasonId: State.currentSeasonId,
+          date, opponent: opp, homeAway: ha,
+          competitionType: compType, competitionName: compName||null,
+          venue: venue||null, opponentScore: oppScore,
+          teamNotes: notes||null, createdAt: new Date().toISOString(),
+        }
+      };
+    }
     return {
       status:'ok', reason:'', display:[date,opp,ha],
       data: {
