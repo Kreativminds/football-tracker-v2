@@ -1491,23 +1491,23 @@ function canDeleteTrainingSession(session, requestingAs) {
 // completed sessions this season — used for the progress view.
 async function getTrainingProgress(playerId, seasonId) {
   const sessions = (await getTrainingSessionsForPlayer(playerId, seasonId)).filter(s => s.status === 'Completed');
+  const customDrillsList = await getAllCustomDrills(); // fetched once, not per drill
   const totals = {}; // drillKey -> { sessionCount, skippedCount, fieldSums: {fieldKey: sum} }
   sessions.forEach(s => {
     (s.drills||[]).forEach(d => {
-      // Library drills (including the default warm-up / sit-ups+push-ups)
-      // are keyed by libraryKey; older generic-category drills are keyed by
-      // drillType. Both need to be counted — this previously only handled
-      // drillType, which silently excluded every library drill from totals.
-      const key = d.libraryKey || d.drillType;
+      // Every drill shape (official library, custom, or legacy generic) is
+      // now resolved through the same shared helper used by the display
+      // functions — this used to only handle libraryKey/drillType, which
+      // silently excluded every custom drill from progress totals entirely.
+      const key = d.libraryKey || d.customDrillId || d.drillType;
       if (!key) return;
-      if (!totals[key]) totals[key] = { sessionCount: 0, skippedCount: 0, fieldSums: {}, isLibrary: !!d.libraryKey };
+      const resolved = resolveSessionDrill(d, customDrillsList);
+      if (!totals[key]) totals[key] = { sessionCount: 0, skippedCount: 0, fieldSums: {}, isLibrary: resolved.kind === 'library', isCustom: resolved.kind === 'custom' };
       totals[key].sessionCount++;
       const status = getDrillCompletionStatus(d);
       if (status === 'skipped' || status === 'missed') totals[key].skippedCount++;
 
-      const fields = d.libraryKey
-        ? (getLibraryDrill(d.libraryKey)?.kpiFields || [])
-        : (DRILL_TYPES.find(dt => dt.key === d.drillType)?.fields || []);
+      const fields = resolved.fields || [];
       fields.forEach(f => {
         // Only number/time/distance/percentage are summable. boolean,
         // choice, and text fields (Pass 3 schema) don't have a meaningful
@@ -1547,18 +1547,24 @@ async function getDrillHistoryForPlayer(drillKey, playerId, seasonId) {
     .filter(s => s.status === 'Completed')
     .sort((a,b) => new Date(b.scheduledDate||0) - new Date(a.scheduledDate||0)); // newest first
 
+  const customDrillsList = await getAllCustomDrills();
   const matching = [];
   sessions.forEach(s => {
     (s.drills||[]).forEach(d => {
       const status = getDrillCompletionStatus(d);
-      if (d.libraryKey === drillKey && isKpiEntryEnabled(status) && status !== 'not_started') matching.push(d);
+      // Now matches by whichever key the drill actually is — library OR
+      // custom — instead of only ever checking libraryKey. This was the
+      // reason custom drill history never worked even after Pass 4 gave
+      // custom drills a real KPI schema to aggregate against.
+      const drillIdentifier = d.libraryKey || d.customDrillId;
+      if (String(drillIdentifier) === String(drillKey) && isKpiEntryEnabled(status) && status !== 'not_started') matching.push(d);
     });
   });
 
   if (!matching.length) return { totalAttempts: 0, fields: {} };
 
-  const drill = getLibraryDrill(drillKey);
-  const kpiFields = drill?.kpiFields || [];
+  const resolved = resolveSessionDrill(matching[0], customDrillsList);
+  const kpiFields = resolved.fields || [];
   const fieldResults = {};
 
   kpiFields.forEach(f => {
@@ -2141,6 +2147,7 @@ const TR = {
     tr_status_skipped:'Skipped', tr_status_missed:'Missed',
     tr_completion_status:'Status',
     tr_move_up:'Move up', tr_move_down:'Move down',
+    tr_new_personal_best:'New Personal Best! {drill} — {field}: {value}',
     tr_created_by_player:'Self-created', tr_created_by_guardian:'Assigned by guardian',
     tr_empty_title:'No training sessions yet',
     tr_empty_desc_guardian:'Create one for {name}, or wait for them to log their own.',
@@ -3033,6 +3040,7 @@ const TR = {
     tr_status_skipped:'Ignorado', tr_status_missed:'Não Realizado',
     tr_completion_status:'Estado',
     tr_move_up:'Mover para cima', tr_move_down:'Mover para baixo',
+    tr_new_personal_best:'Novo Recorde Pessoal! {drill} — {field}: {value}',
     tr_created_by_player:'Criada por ele(a)', tr_created_by_guardian:'Atribuída pelo encarregado',
     tr_empty_title:'Ainda sem sessões de treino',
     tr_empty_desc_guardian:'Crie uma para {name}, ou espere que ele(a) registe a sua própria.',
@@ -4905,6 +4913,18 @@ async function saveCustomDrill(drill) {
   if (!drill.ownerType || drill.ownerType === 'official') {
     throw new Error('Custom drills must have ownerType "guardian" or "player", never "official".');
   }
+  // Phase 1 hardening: on an UPDATE (drillId already set), independently
+  // re-verify the incoming ownerType/ownerId actually matches the EXISTING
+  // stored record's real owner, rather than trusting whatever the caller
+  // passed in. Not currently exploitable (the only caller, the Drill
+  // Builder, already blocks entry earlier), but this makes the function
+  // self-defending rather than relying solely on that earlier check.
+  if (drill.drillId) {
+    const existing = await DB.get('customDrills', drill.drillId);
+    if (existing && !canEditDrill(existing, drill.ownerType, drill.ownerId)) {
+      throw new Error('You do not have permission to modify this drill.');
+    }
+  }
   if (!drill.status) drill.status = 'active';
   return DB.put('customDrills', drill);
 }
@@ -4942,9 +4962,9 @@ function canEditDrill(drill, requestingAs, requestingOwnerId) {
   if (!drill || drill.ownerType === 'official') return false;
   return drill.ownerType === requestingAs && String(drill.ownerId) === String(requestingOwnerId);
 }
-function canDeleteDrill(drill, requestingAs, requestingOwnerId) {
-  return canEditDrill(drill, requestingAs, requestingOwnerId); // same rule for now
-}
+// canDeleteDrill removed as dead code in the Phase 1 stabilization pass —
+// defined in Pass 1, never actually called; every archive path uses
+// canEditDrill directly.
 
 // ── PASS 4 — CUSTOM DRILL BUILDER ────────────────────────────────────────────
 // A single-page form (not literally multi-screen — all fields visible at
@@ -5162,13 +5182,12 @@ async function openDrillDetailPopup(drillKey, playerId, mode, rowIndex) {
   const { userType, userId } = getCurrentDrillUser(mode === 'perform' || mode === 'plan' ? _trainingFormViewAs : _trainingFormViewAs);
   const favourited = await isDrillFavourited(drillKey, userType, userId);
 
-  // Only official/library drills currently carry a real kpiFields schema
-  // with showAverage/showPersonalBest metadata to aggregate against —
-  // custom drills (Pass 4+) and legacy generic types don't have history
-  // wired yet, so they fall through to the "no attempts" empty state.
-  const history = drill.ownerType === 'official'
-    ? await getDrillHistoryForPlayer(drillKey, playerId, State.currentSeasonId)
-    : { totalAttempts: 0, fields: {} };
+  // Works for both official and custom drills — both carry a full
+  // kpiFields schema (custom drills have done so since Pass 4), and
+  // getDrillHistoryForPlayer now resolves either kind correctly. No
+  // longer conditional on ownerType, since every drill has history to
+  // check for once completed sessions exist.
+  const history = await getDrillHistoryForPlayer(drillKey, playerId, State.currentSeasonId);
 
   const overlay = document.createElement('div');
   overlay.className = 'rm-form-overlay open';
@@ -5322,6 +5341,15 @@ function canArchivePack(pack, requestingAs, requestingOwnerId) {
 async function saveTrainingPack(pack) {
   if (!pack.ownerType || pack.ownerType === 'official') {
     throw new Error('Custom packs must have ownerType "guardian" or "player", never "official".');
+  }
+  // Phase 1 hardening — same reasoning as saveCustomDrill above: verify
+  // the incoming ownership claim against the actual stored record on
+  // update, not just trust the caller.
+  if (pack.packId) {
+    const existing = await DB.get('trainingPacks', pack.packId);
+    if (existing && !canEditPack(existing, pack.ownerType, pack.ownerId)) {
+      throw new Error('You do not have permission to modify this pack.');
+    }
   }
   if (!pack.status) pack.status = 'active';
   return DB.put('trainingPacks', pack);
@@ -5821,6 +5849,38 @@ function addLegacyDrillFromPicker(drillTypeKey, playerId, mode, rowIndex) {
   if (mode === 'plan') refreshAutoSessionName(playerId);
 }
 
+// ── PHASE 1 FIX — shared drill resolution for display ────────────────────────
+// Every session drill entry is one of three shapes: an official library
+// drill (libraryKey), a custom drill (customDrillId), or a legacy generic
+// drill (drillType). This was previously resolved separately, and
+// inconsistently, in three different render functions — none of which
+// checked customDrillId at all, so a custom drill added to a session
+// rendered blank everywhere. This single helper is now the only place that
+// logic lives; callers must pass an already-fetched customDrills array
+// (fetch once per render, not per row) since drill resolution itself stays
+// synchronous for use inside .map().
+function resolveSessionDrill(drill, customDrillsList) {
+  if (drill.libraryKey) {
+    return { kind: 'library', drill: getLibraryDrill(drill.libraryKey), fields: null };
+  }
+  if (drill.customDrillId) {
+    const custom = (customDrillsList || []).find(d => String(d.drillId) === String(drill.customDrillId));
+    return { kind: 'custom', drill: custom || null, fields: custom ? custom.kpiFields : null };
+  }
+  if (drill.drillType) {
+    const def = DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0];
+    return { kind: 'generic', drill: def, fields: def.fields };
+  }
+  return { kind: 'none', drill: null, fields: null };
+}
+
+function drillResolutionLabel(resolved) {
+  if (resolved.kind === 'library' && resolved.drill) return libDrillDisplayName(resolved.drill.key);
+  if (resolved.kind === 'custom' && resolved.drill) return resolved.drill.name;
+  if (resolved.kind === 'generic' && resolved.drill) return drillTypeLabel(resolved.drill.key);
+  return I18n.t('drill_picker_no_drill_selected');
+}
+
 // ── PASS 5 — COMPLETION STATES ───────────────────────────────────────────────
 // Five states replace the old skipped:true/false boolean:
 //   not_started | completed | partial | skipped | missed
@@ -5844,6 +5904,25 @@ function getDrillCompletionStatus(drill) {
 
 function isKpiEntryEnabled(status) {
   return status === 'completed' || status === 'partial' || status === 'not_started';
+}
+
+// ── PHASE 2 — completion status as large tap targets, not a dropdown ────────
+// Replaces the old <select> with real buttons: at least 44px tall (comfortable
+// mobile tap target, fixing the audit's flagged undersized reorder buttons at
+// the same touchpoint), icon + short label, clear selected state. One tap,
+// not "open dropdown → scroll → tap → close."
+const COMPLETION_STATUS_STYLE = {
+  completed: { icon: '&#9989;', color: '#2a7a4e', bg: '#e6f4ea' },
+  partial:   { icon: '&#128993;', color: '#8a6d1a', bg: '#fbf3d9' },
+  skipped:   { icon: '&#10060;', color: '#8a5a20', bg: '#f0d9c0' },
+  missed:    { icon: '&#10060;', color: '#8a5a20', bg: '#f0d9c0' },
+};
+function completionStatusButton(statusKey, currentStatus, onclickCall) {
+  const s = COMPLETION_STATUS_STYLE[statusKey];
+  const isSelected = currentStatus === statusKey;
+  return `<button type="button" onclick="${onclickCall}" style="min-height:44px;padding:8px 6px;border-radius:8px;border:2px solid ${isSelected?s.color:'var(--border)'};background:${isSelected?s.bg:'#fff'};color:${isSelected?s.color:'var(--dark)'};font-size:12px;font-weight:${isSelected?'700':'500'};cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;width:100%;min-width:0;box-sizing:border-box">
+    <span style="font-size:15px;flex-shrink:0">${s.icon}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${I18n.t('tr_status_'+statusKey)}</span>
+  </button>`;
 }
 
 // Per your explicit instruction: changing status to skipped/missed does
@@ -6593,6 +6672,7 @@ async function renderPlayerTraining(playerId, viewAs) {
 
   const { totals } = await getTrainingProgress(playerId, State.currentSeasonId);
   const progressKeys = Object.keys(totals);
+  const progressCustomDrillsList = await getAllCustomDrills();
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -6612,7 +6692,8 @@ async function renderPlayerTraining(playerId, viewAs) {
       ${progressKeys.map(drillKey => {
         const t = totals[drillKey];
         const fieldEntries = Object.entries(t.fieldSums);
-        const label = t.isLibrary ? libDrillDisplayName(drillKey) : drillTypeLabel(drillKey);
+        const customDrillMatch = t.isCustom ? progressCustomDrillsList.find(d => String(d.drillId) === String(drillKey)) : null;
+        const label = t.isLibrary ? libDrillDisplayName(drillKey) : (t.isCustom ? (customDrillMatch?.name || drillKey) : drillTypeLabel(drillKey));
         const doneCount = t.sessionCount - t.skippedCount;
         return `<div style="margin-bottom:10px">
           <div style="font-size:12px;font-weight:700;margin-bottom:4px">${esc(label)}
@@ -6620,7 +6701,9 @@ async function renderPlayerTraining(playerId, viewAs) {
           </div>
           <div style="display:flex;gap:14px;flex-wrap:wrap">
             ${fieldEntries.map(([fk,sum]) => {
-              const fLabel = t.isLibrary ? (getLibraryDrill(drillKey)?.kpiFields.find(f=>f.key===fk)?.label || fk) : drillFieldLabel(drillKey,fk);
+              const fLabel = t.isLibrary
+                ? (getLibraryDrill(drillKey)?.kpiFields.find(f=>f.key===fk)?.label || fk)
+                : (t.isCustom ? (customDrillMatch?.kpiFields.find(f=>f.key===fk)?.label || fk) : drillFieldLabel(drillKey,fk));
               return `<div style="font-size:11px;color:var(--muted)">${esc(fLabel)}: <strong style="color:var(--dark)">${sum}</strong></div>`;
             }).join('')}
           </div>
@@ -6736,13 +6819,8 @@ function refreshAutoSessionName(playerId) {
 
 // SUPERSEDED as of Pass 2 — adding a drill now always goes through
 // openDrillLibraryPicker() → the Detail Popup → addDrillFromPicker(), so
-// every addition is reviewed first. Kept here, unused, only in case a
-// rollback of the picker flow is ever needed.
-function addTrainingDrillRow(playerId, mode = 'plan') {
-  _trainingFormDrills.push({ drillType: DRILL_TYPES[0].key });
-  renderTrainingDrillRows(playerId, mode);
-  if (mode === 'plan') refreshAutoSessionName(playerId);
-}
+// every addition is reviewed first. Removed as dead code in the Phase 1
+// stabilization pass — confirmed zero callers anywhere in the codebase.
 
 function removeTrainingDrillRow(playerId, index, mode = 'plan') {
   _trainingFormDrills.splice(index, 1);
@@ -6750,15 +6828,28 @@ function removeTrainingDrillRow(playerId, index, mode = 'plan') {
   if (mode === 'plan') refreshAutoSessionName(playerId);
 }
 
-function updateTrainingDrillType(playerId, index, newType) {
-  // Reset to a fresh object for the new type so leftover fields from the
-  // previous drill type don't linger invisibly in the saved record.
-  _trainingFormDrills[index] = { drillType: newType };
-  renderTrainingDrillRows(playerId);
-}
-
 function updateTrainingDrillField(index, fieldKey, value, isText) {
   _trainingFormDrills[index][fieldKey] = isText ? value : (parseFloat(value)||0);
+}
+
+// ── PHASE 2 — counters/steppers instead of typing ────────────────────────────
+// [-] value [+] per field, avoiding the keyboard for the common case of
+// small adjustments. Typing directly into the number is still possible
+// (the value itself is a real input) for larger jumps, so nothing is lost —
+// this is quicker for the common case, not a restriction.
+function stepTrainingDrillField(index, fieldKey, delta, rerenderFn) {
+  const current = parseFloat(_trainingFormDrills[index][fieldKey]) || 0;
+  _trainingFormDrills[index][fieldKey] = Math.max(0, current + delta);
+  rerenderFn();
+}
+
+function renderKpiStepper(value, onDecClick, onIncClick, onTypeInput, disabled) {
+  return `
+    <div style="display:flex;align-items:center;gap:4px">
+      <button type="button" onclick="${onDecClick}" ${disabled?'disabled':''} style="width:36px;height:36px;flex-shrink:0;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:18px;font-weight:700;cursor:pointer;${disabled?'opacity:.4':''}">&minus;</button>
+      <input type="number" min="0" value="${value??0}" oninput="${onTypeInput}" style="width:100%;min-width:0;text-align:center;padding:6px 4px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-weight:700" ${disabled?'disabled':''}>
+      <button type="button" onclick="${onIncClick}" ${disabled?'disabled':''} style="width:36px;height:36px;flex-shrink:0;border-radius:8px;border:1px solid var(--border);background:#fff;font-size:18px;font-weight:700;cursor:pointer;${disabled?'opacity:.4':''}">+</button>
+    </div>`;
 }
 
 // mode 'plan' = creation form: just pick which drills are part of the
@@ -6766,21 +6857,32 @@ function updateTrainingDrillField(index, fieldKey, value, isText) {
 // moment the drill actually happens, not when it's being planned.
 // mode 'perform' = completion form: full editing of actual results plus
 // the Not Done toggle, shown once the session is actually being closed out.
-function renderTrainingDrillRows(playerId, mode = 'plan') {
+async function renderTrainingDrillRows(playerId, mode = 'plan') {
   const el = document.getElementById(`trainingDrillRows-${playerId}`);
   if (!el) return;
+
+  // Fetched once per render, not per row — same pattern already used
+  // correctly in the Pack Builder since Pass 4.
+  const customDrillsList = await getAllCustomDrills();
 
   // Group library drills by category for a cleaner dropdown.
   const categories = [...new Set(DRILL_LIBRARY.map(d => d.category))];
 
   el.innerHTML = _trainingFormDrills.map((drill, i) => {
-    const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
-    const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const scoreFields = libDrill ? libDrill.kpiFields : (def ? def.fields : []);
-    const rowLabel = libDrill ? libDrillDisplayName(libDrill.key) : (def ? drillTypeLabel(def.key) : I18n.t('drill_picker_no_drill_selected'));
+    const resolved = resolveSessionDrill(drill, customDrillsList);
+    const libDrill = resolved.kind === 'library' ? resolved.drill : null;
+    const customDrill = resolved.kind === 'custom' ? resolved.drill : null;
+    const def = resolved.kind === 'generic' ? resolved.drill : null;
+    const scoreFields = resolved.fields || [];
+    const rowLabel = drillResolutionLabel(resolved);
     const status = getDrillCompletionStatus(drill);
     const entryEnabled = isKpiEntryEnabled(status);
     const isDisabledLook = status === 'skipped' || status === 'missed';
+    // Instructional detail block applies to library AND custom drills —
+    // both carry the same objective/instructions/coachingPoints/progression
+    // shape, only officials get it hardcoded, customs get it from the
+    // Drill Builder form.
+    const detailDrill = libDrill || customDrill;
 
     return `
       <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${isDisabledLook?'background:#faf5f0':''}">
@@ -6798,27 +6900,30 @@ function renderTrainingDrillRows(playerId, mode = 'plan') {
 
         ${mode==='perform' ? `
         <div style="margin-bottom:8px">
-          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${I18n.t('tr_completion_status')}</label>
-          <select onchange="handleDrillStatusChange(${playerId},${i},this.value,'${mode}')" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-            ${['not_started','completed','partial','skipped','missed'].map(s => `<option value="${s}" ${status===s?'selected':''}>${I18n.t('tr_status_'+s)}</option>`).join('')}
-          </select>
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">${I18n.t('tr_completion_status')}</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            ${completionStatusButton('completed', status, `handleDrillStatusChange(${playerId},${i},'completed','${mode}')`)}
+            ${completionStatusButton('partial', status, `handleDrillStatusChange(${playerId},${i},'partial','${mode}')`)}
+            ${completionStatusButton('skipped', status, `handleDrillStatusChange(${playerId},${i},'skipped','${mode}')`)}
+            ${completionStatusButton('missed', status, `handleDrillStatusChange(${playerId},${i},'missed','${mode}')`)}
+          </div>
         </div>` : ''}
 
-        ${libDrill ? `
+        ${detailDrill ? `
         <div style="background:#f8f8f8;border-radius:4px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:var(--dark)">
-          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_objective')}:</strong> ${esc(libDrill.objective)}</div>
-          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_instructions')}:</strong> ${esc(libDrill.instructions)}</div>
-          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_coaching_points')}:</strong> ${esc(libDrill.coachingPoints)}</div>
-          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_progression')}:</strong> ${esc(libDrill.progression)}</div>
-          <div style="color:var(--muted)">${I18n.t('tr_drill_meta_line', {duration: libDrill.durationMin, difficulty: libDrill.difficulty, equipment: libDrill.equipment})}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_objective')}:</strong> ${esc(detailDrill.objective)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_instructions')}:</strong> ${esc(detailDrill.instructions)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_coaching_points')}:</strong> ${esc(detailDrill.coachingPoints)}</div>
+          <div style="margin-bottom:4px"><strong>${I18n.t('tr_drill_progression')}:</strong> ${esc(detailDrill.progression)}</div>
+          <div style="color:var(--muted)">${I18n.t('tr_drill_meta_line', {duration: detailDrill.durationMin, difficulty: detailDrill.difficulty, equipment: detailDrill.equipment})}</div>
         </div>` : ''}
 
         ${mode==='perform' ? `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
           ${scoreFields.map(f => {
             const fieldKey = f.key;
-            const fieldLabel = libDrill ? f.label : drillFieldLabel(def.key, f.key);
-            const isText = !libDrill && f.isText;
+            const fieldLabel = (libDrill || customDrill) ? f.label : drillFieldLabel(def.key, f.key);
+            const isText = resolved.kind === 'generic' && f.isText;
             // Per Pass 5 clarification: existing values are shown as-is even
             // when entry is disabled — never auto-zeroed just by viewing a
             // skipped/missed drill. Only an explicit edit+save changes data.
@@ -6827,7 +6932,7 @@ function renderTrainingDrillRows(playerId, mode = 'plan') {
               <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
               ${isText
                 ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`
-                : `<input type="number" min="0" value="${drill[fieldKey]??0}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`}
+                : renderKpiStepper(drill[fieldKey], `stepTrainingDrillField(${i},'${fieldKey}',-1,()=>renderTrainingDrillRows(${playerId},'${mode}'))`, `stepTrainingDrillField(${i},'${fieldKey}',1,()=>renderTrainingDrillRows(${playerId},'${mode}'))`, `updateTrainingDrillField(${i},'${fieldKey}',this.value,false)`, !entryEnabled)}
             </div>`;
           }).join('')}
         </div>` : ''}
@@ -6840,20 +6945,9 @@ function handleDrillStatusChange(playerId, index, newStatus, mode) {
   renderTrainingDrillRows(playerId, mode);
 }
 
-// "lib:wallPassing100" or "gen:juggling" — encodes which list the selection
-// came from, since library and generic drills have different shapes.
-// SUPERSEDED as of Pass 2 — see addTrainingDrillRow note above; row-level
-// drill changes now go through the same picker/popup review flow.
-function updateTrainingDrillSelection(playerId, index, value, mode = 'plan') {
-  const [kind, key] = value.split(':');
-  if (kind === 'lib') {
-    _trainingFormDrills[index] = { libraryKey: key, drillType: null };
-  } else {
-    _trainingFormDrills[index] = { drillType: key, libraryKey: null };
-  }
-  renderTrainingDrillRows(playerId, mode);
-  if (mode === 'plan') refreshAutoSessionName(playerId);
-}
+// SUPERSEDED as of Pass 2 — row-level drill changes now go through the
+// same picker/popup review flow as new additions. Removed as dead code in
+// the Phase 1 stabilization pass — confirmed zero callers anywhere.
 
 
 
@@ -6903,6 +6997,7 @@ async function openTrainingViewer(sessionId, viewAs) {
   const player = await DB.get('players', session.playerId);
   const canEdit = canEditTrainingSession(session, viewAs);
   const canDelete = canDeleteTrainingSession(session, viewAs);
+  const customDrillsList = await getAllCustomDrills();
 
   const overlay = document.createElement('div');
   overlay.className = 'rm-form-overlay open';
@@ -6916,10 +7011,11 @@ async function openTrainingViewer(sessionId, viewAs) {
         <span style="font-size:11px;color:var(--muted)">${session.createdBy==='player'?I18n.t('tr_created_by_player'):I18n.t('tr_created_by_guardian')}</span>
       </div>
       ${(session.drills||[]).length ? session.drills.map(d => {
-        const libDrill = d.libraryKey ? getLibraryDrill(d.libraryKey) : null;
-        const def = !libDrill ? DRILL_TYPES.find(dt => dt.key === d.drillType) : null;
-        const label = libDrill ? libDrillDisplayName(d.libraryKey) : drillTypeLabel(d.drillType);
-        const fields = libDrill ? libDrill.kpiFields : (def?.fields || []);
+        const resolved = resolveSessionDrill(d, customDrillsList);
+        const libDrill = resolved.kind === 'library' ? resolved.drill : null;
+        const customDrill = resolved.kind === 'custom' ? resolved.drill : null;
+        const label = drillResolutionLabel(resolved);
+        const fields = resolved.fields || [];
         const status = getDrillCompletionStatus(d);
         const isDisabledLook = status === 'skipped' || status === 'missed';
         return `<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;${isDisabledLook?'background:#faf5f0':''}">
@@ -6929,7 +7025,7 @@ async function openTrainingViewer(sessionId, viewAs) {
           </div>
           <div style="display:flex;gap:14px;flex-wrap:wrap">
             ${fields.map(f => {
-              const fLabel = libDrill ? f.label : drillFieldLabel(d.drillType,f.key);
+              const fLabel = (libDrill || customDrill) ? f.label : drillFieldLabel(d.drillType,f.key);
               return `<div style="font-size:11px;color:var(--muted)">${esc(fLabel)}: <strong style="color:var(--dark)">${esc(String(d[f.key]??'—'))}</strong></div>`;
             }).join('')}
           </div>
@@ -6983,14 +7079,16 @@ async function openTrainingCompletionForm(sessionId, viewAs) {
 // overlay's own container rather than the training-tab form panel, since
 // this can be opened from the session viewer on any page, not just the
 // Training tab itself.
-function renderTrainingCompletionRows() {
+async function renderTrainingCompletionRows() {
   const el = document.getElementById('trainingDrillRows-completion');
   if (!el) return;
+  const customDrillsList = await getAllCustomDrills();
   el.innerHTML = _trainingFormDrills.map((drill, i) => {
-    const libDrill = drill.libraryKey ? getLibraryDrill(drill.libraryKey) : null;
-    const def = !libDrill ? (DRILL_TYPES.find(d => d.key === drill.drillType) || DRILL_TYPES[0]) : null;
-    const scoreFields = libDrill ? libDrill.kpiFields : (def ? def.fields : []);
-    const label = libDrill ? libDrillDisplayName(drill.libraryKey) : drillTypeLabel(drill.drillType);
+    const resolved = resolveSessionDrill(drill, customDrillsList);
+    const libDrill = resolved.kind === 'library' ? resolved.drill : null;
+    const customDrill = resolved.kind === 'custom' ? resolved.drill : null;
+    const scoreFields = resolved.fields || [];
+    const label = drillResolutionLabel(resolved);
     const status = getDrillCompletionStatus(drill);
     const entryEnabled = isKpiEntryEnabled(status);
     const isDisabledLook = status === 'skipped' || status === 'missed';
@@ -7005,16 +7103,19 @@ function renderTrainingCompletionRows() {
           <div style="font-size:13px;font-weight:700;flex:1">${esc(label)}</div>
         </div>
         <div style="margin-bottom:8px">
-          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${I18n.t('tr_completion_status')}</label>
-          <select onchange="handleCompletionStatusChange(${i},this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-            ${['not_started','completed','partial','skipped','missed'].map(s => `<option value="${s}" ${status===s?'selected':''}>${I18n.t('tr_status_'+s)}</option>`).join('')}
-          </select>
+          <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">${I18n.t('tr_completion_status')}</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            ${completionStatusButton('completed', status, `handleCompletionStatusChange(${i},'completed')`)}
+            ${completionStatusButton('partial', status, `handleCompletionStatusChange(${i},'partial')`)}
+            ${completionStatusButton('skipped', status, `handleCompletionStatusChange(${i},'skipped')`)}
+            ${completionStatusButton('missed', status, `handleCompletionStatusChange(${i},'missed')`)}
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
           ${scoreFields.map(f => {
             const fieldKey = f.key;
-            const fieldLabel = libDrill ? f.label : drillFieldLabel(drill.drillType, f.key);
-            const isText = !libDrill && f.isText;
+            const fieldLabel = (libDrill || customDrill) ? f.label : drillFieldLabel(drill.drillType, f.key);
+            const isText = resolved.kind === 'generic' && f.isText;
             // Existing values stay visible even when entry is disabled —
             // never auto-zeroed just by changing status. Only cleared if
             // the person explicitly edits and saves with new values.
@@ -7023,7 +7124,7 @@ function renderTrainingCompletionRows() {
               <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:2px">${esc(fieldLabel)}</label>
               ${isText
                 ? `<input type="text" value="${esc(drill[fieldKey]||'')}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,true);" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''} onchange="renderTrainingCompletionRows()">`
-                : `<input type="number" min="0" value="${drill[fieldKey]??0}" oninput="updateTrainingDrillField(${i},'${fieldKey}',this.value,false)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:3px;font-size:13px" ${!entryEnabled?'disabled':''}>`}
+                : renderKpiStepper(drill[fieldKey], `stepTrainingDrillField(${i},'${fieldKey}',-1,renderTrainingCompletionRows)`, `stepTrainingDrillField(${i},'${fieldKey}',1,renderTrainingCompletionRows)`, `updateTrainingDrillField(${i},'${fieldKey}',this.value,false)`, !entryEnabled)}
             </div>`;
           }).join('')}
         </div>
@@ -7039,12 +7140,66 @@ function handleCompletionStatusChange(index, newStatus) {
 async function saveTrainingCompletion() {
   const session = await DB.get('trainingSessions', _trainingCompletionSessionId);
   if (!session) return;
+
+  // ── PHASE 2 — Personal Best celebration ──────────────────────────────────
+  // Capture each drill's Personal Best BEFORE this save, so after saving we
+  // can tell whether today's result actually beat it. Only meaningful for
+  // official/custom drills with a real kpiFields schema (legacy generic
+  // drills don't have PB tracking at all, correctly skipped here).
+  const previousBests = {}; // drillIdentifier -> { fieldKey: previousBestValue }
+  for (const drill of _trainingFormDrills) {
+    const drillIdentifier = drill.libraryKey || drill.customDrillId;
+    if (!drillIdentifier) continue;
+    const history = await getDrillHistoryForPlayer(drillIdentifier, session.playerId, session.seasonId);
+    previousBests[drillIdentifier] = {};
+    Object.entries(history.fields || {}).forEach(([fk, r]) => {
+      if (r.field.showPersonalBest) previousBests[drillIdentifier][fk] = r.personalBest;
+    });
+  }
+
   session.drills = JSON.parse(JSON.stringify(_trainingFormDrills));
   session.status = 'Completed';
   await saveTrainingSession(session);
   document.getElementById('trainingCompletionOverlay')?.remove();
   Toast.show(I18n.t('tr_saved'));
+
+  // Now recompute and compare — celebrate the first genuine improvement
+  // found (one celebration per save keeps this feeling special, not noisy,
+  // even if several fields improved at once).
+  await celebrateAnyNewPersonalBests(session, previousBests);
+
   await renderPlayerTraining(session.playerId, _trainingCompletionViewAs);
+}
+
+// Compares freshly-saved results against the pre-save Personal Bests
+// captured above, and shows one celebratory toast for the first genuine
+// improvement found. Deliberately simple — no animation library, no new
+// UI component, just the existing Toast system with a distinct message,
+// so this is cheap to build and cheap to maintain.
+async function celebrateAnyNewPersonalBests(session, previousBests) {
+  for (const drill of session.drills) {
+    const status = getDrillCompletionStatus(drill);
+    if (!isKpiEntryEnabled(status) || status === 'not_started') continue;
+    const drillIdentifier = drill.libraryKey || drill.customDrillId;
+    if (!drillIdentifier || !previousBests[drillIdentifier]) continue;
+
+    const resolved = resolveSessionDrill(drill, await getAllCustomDrills());
+    const kpiFields = resolved.fields || [];
+    for (const f of kpiFields) {
+      if (!f.showPersonalBest) continue;
+      const prevBest = previousBests[drillIdentifier][f.key];
+      const newValue = parseFloat(drill[f.key]);
+      if (isNaN(newValue)) continue;
+      const improved = prevBest === null || prevBest === undefined
+        ? true // first-ever recorded value for this field counts as a PB
+        : (f.goalDirection === 'lower' ? newValue < prevBest : newValue > prevBest);
+      if (improved) {
+        const drillLabel = drillResolutionLabel(resolved);
+        Toast.show(`🏆 ${I18n.t('tr_new_personal_best', {drill: drillLabel, field: f.label, value: formatKpiValue(f, newValue)})}`);
+        return; // one celebration per save — see comment above
+      }
+    }
+  }
 }
 
 function confirmDeleteTrainingSession(sessionId, viewAs) {
@@ -9562,7 +9717,14 @@ const Sync = (() => {
   let _log = [];
 
   // Stores that sync to cloud (backups excluded — too large)
-  const SYNC_STORES = ['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents'];
+  // Fixed: this used to be its own separate, stale 8-store array that
+  // predated the Training module and was never updated across Passes 1-4,
+  // meaning trainingSessions/customDrills/drillFavourites/trainingPacks
+  // were silently excluded from every push and pull cycle since they were
+  // introduced. Now derived from the single authoritative SYNC_STORES_SET
+  // (declared once, near the top of the file) so there is only one source
+  // of truth for "which stores sync" going forward.
+  const SYNC_STORES = [...SYNC_STORES_SET];
 
   function log(msg) {
     const line = new Date().toLocaleTimeString() + ' — ' + msg;
