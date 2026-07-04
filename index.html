@@ -5531,7 +5531,22 @@ async function getTournamentsForSeason(seasonId) {
   return DB.getAll('tournaments', 'seasonId', seasonId);
 }
 async function getTournamentById(tournamentId) {
-  return DB.get('tournaments', tournamentId);
+  if (tournamentId === null || tournamentId === undefined) return null;
+  // IndexedDB key lookups are strict-typed — a numeric key won't match a
+  // string lookup value or vice versa. Games saved via the manual dropdown
+  // before this fix may have tournamentId stored as a string ("1") while
+  // the tournament itself is keyed numerically (1), silently failing
+  // get() with no error. Try the value as given first (fast path for the
+  // common, correctly-typed case), then retry with the numeric form if
+  // that returns nothing — this fixes lookups for already-saved games
+  // without needing to touch their stored data at all.
+  const direct = await DB.get('tournaments', tournamentId);
+  if (direct) return direct;
+  const asNumber = parseInt(tournamentId);
+  if (!isNaN(asNumber) && String(asNumber) !== String(tournamentId)) {
+    return DB.get('tournaments', asNumber);
+  }
+  return direct;
 }
 async function saveTemporaryPlayer(tempPlayer) {
   return DB.put('temporaryPlayers', tempPlayer);
@@ -5542,7 +5557,9 @@ async function getTemporaryPlayersForSeason(seasonId) {
 
 // ── TOURNAMENTS (Pass 2 — UI) ─────────────────────────────────────────────────
 async function openTournamentForm(tournamentId) {
+  console.log('[TOURN DEBUG] openTournamentForm called with tournamentId =', tournamentId, typeof tournamentId);
   const existing = tournamentId ? await getTournamentById(tournamentId) : null;
+  console.log('[TOURN DEBUG] existing tournament loaded =', existing);
   const overlay = document.createElement('div');
   overlay.className = 'rm-form-overlay open';
   overlay.id = 'tournamentFormOverlay';
@@ -5673,15 +5690,15 @@ async function saveTemporaryPlayerFromForm(tempPlayerId, tournamentId) {
   }
 
   document.getElementById('tempPlayerFormOverlay')?.remove();
-  Toast.show(I18n.t('tempp_saved') + ` [DEBUG: linked to tournament ${tournamentId}, team now has ${tournamentId ? (await getTournamentById(tournamentId))?.team?.temporaryPlayerIds?.length : '?'} temp player(s)]`);
+  Toast.show(I18n.t('tempp_saved'));
 
-  // Refresh the temp players list inside the still-open tournament form,
-  // if it's the one that triggered this — so a newly added or edited
-  // player appears immediately without closing and reopening anything.
-  const listEl = document.getElementById('tournTempPlayersList');
-  if (listEl && tournamentId) {
-    const tournament = await getTournamentById(tournamentId);
-    listEl.outerHTML = await renderTournamentTempPlayersList(tournament);
+  // The targeted live-refresh wasn't reliably updating in practice, so this
+  // simply closes and fully reopens the tournament form instead — confirmed
+  // to definitely work, since that's the exact action that already shows
+  // the newly added player correctly.
+  if (tournamentId) {
+    document.getElementById('tournamentFormOverlay')?.remove();
+    await openTournamentForm(tournamentId);
   }
 }
 
@@ -8865,11 +8882,16 @@ const Render = (() => {
     // game never sees this list at all — activePlayers stays exactly as
     // it always has been.
     let tempPlayersForGame = [];
+    console.log('[TOURN DEBUG] game.tournamentId =', game.tournamentId, typeof game.tournamentId);
     if (game.tournamentId) {
       const tournament = await getTournamentById(game.tournamentId);
+      console.log('[TOURN DEBUG] tournament loaded for this game =', tournament);
       if (tournament?.team?.temporaryPlayerIds?.length) {
         const allTempPlayers = await getTemporaryPlayersForSeason(State.currentSeasonId);
         tempPlayersForGame = allTempPlayers.filter(tp => tournament.team.temporaryPlayerIds.includes(tp.tempPlayerId));
+        console.log('[TOURN DEBUG] temp players resolved for this game =', tempPlayersForGame);
+      } else {
+        console.log('[TOURN DEBUG] tournament has NO temporaryPlayerIds, or tournament itself is null/undefined');
       }
     }
     window._gdTempPlayers = tempPlayersForGame;
@@ -11068,7 +11090,7 @@ async function saveGame() {
     homeAway: document.getElementById('gf-venue').value,
     competitionType: document.getElementById('gf-compType').value,
     competitionName: document.getElementById('gf-compName').value.trim()||null,
-    tournamentId: document.getElementById('gf-tournament')?.value || null,
+    tournamentId: document.getElementById('gf-tournament')?.value ? parseInt(document.getElementById('gf-tournament').value) : null,
     venue: document.getElementById('gf-ground').value.trim()||null,
     teamNotes: document.getElementById('gf-notes').value.trim()||null,
     createdAt: new Date().toISOString(),
