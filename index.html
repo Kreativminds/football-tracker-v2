@@ -5557,7 +5557,8 @@ async function openTournamentForm(tournamentId) {
         <div class="form-group"><label>${I18n.t('tourn_end_date')}</label><input id="tf-end" type="date" value="${existing?.endDate||''}"></div>
         <div class="form-group full"><label>${I18n.t('tourn_notes')}</label><textarea id="tf-notes">${esc(existing?.notes||'')}</textarea></div>
       </div>
-      ${existing ? `<button type="button" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:10px" onclick="openTemporaryPlayerForm(null)">+ ${I18n.t('tempp_new_title')}</button>` : ''}
+      ${existing ? await renderTournamentTempPlayersList(existing) : ''}
+      ${existing ? `<button type="button" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:10px" onclick="openTemporaryPlayerForm(null, ${existing.tournamentId})">+ ${I18n.t('tempp_new_title')}</button>` : ''}
       <div class="form-actions">
         <button class="btn btn-primary" onclick="saveTournamentFromForm(${tournamentId ?? 'null'})">${I18n.t('common_save')}</button>
         <button class="btn btn-secondary" onclick="document.getElementById('tournamentFormOverlay').remove()">${I18n.t('common_cancel')}</button>
@@ -5611,7 +5612,7 @@ async function renderTournamentsList() {
 }
 
 // ── TEMPORARY PLAYERS (Pass 2 — UI) ──────────────────────────────────────────
-async function openTemporaryPlayerForm(tempPlayerId) {
+async function openTemporaryPlayerForm(tempPlayerId, tournamentId) {
   const existing = tempPlayerId ? await DB.get('temporaryPlayers', tempPlayerId) : null;
   const overlay = document.createElement('div');
   overlay.className = 'rm-form-overlay open';
@@ -5626,14 +5627,14 @@ async function openTemporaryPlayerForm(tempPlayerId) {
         <div class="form-group full"><label>${I18n.t('tempp_notes')}</label><textarea id="tpf-notes">${esc(existing?.notes||'')}</textarea></div>
       </div>
       <div class="form-actions">
-        <button class="btn btn-primary" onclick="saveTemporaryPlayerFromForm(${tempPlayerId ?? 'null'})">${I18n.t('common_save')}</button>
+        <button class="btn btn-primary" onclick="saveTemporaryPlayerFromForm(${tempPlayerId ?? 'null'}, ${tournamentId ?? 'null'})">${I18n.t('common_save')}</button>
         <button class="btn btn-secondary" onclick="document.getElementById('tempPlayerFormOverlay').remove()">${I18n.t('common_cancel')}</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
 }
 
-async function saveTemporaryPlayerFromForm(tempPlayerId) {
+async function saveTemporaryPlayerFromForm(tempPlayerId, tournamentId) {
   const name = document.getElementById('tpf-name')?.value.trim();
   if (!name) { Toast.error(I18n.t('tempp_err_name_required')); return; }
   const tempPlayer = {
@@ -5645,9 +5646,59 @@ async function saveTemporaryPlayerFromForm(tempPlayerId) {
     sourceType: 'tournament',
   };
   if (tempPlayerId) tempPlayer.tempPlayerId = tempPlayerId;
-  await saveTemporaryPlayer(tempPlayer);
+  const savedId = await saveTemporaryPlayer(tempPlayer);
+  const realTempPlayerId = tempPlayerId || savedId;
+
+  // This was the actual bug: a temp player was being saved into the
+  // temporaryPlayers store correctly, but never added to the tournament's
+  // own team.temporaryPlayerIds list — which is the ONLY thing every
+  // Squad/lineup/goals screen actually checks to decide who's selectable
+  // for a tournament game. Without this, the player existed in the
+  // database but was invisible everywhere.
+  if (tournamentId) {
+    const tournament = await getTournamentById(tournamentId);
+    if (tournament) {
+      if (!tournament.team) tournament.team = { playerIds: [], temporaryPlayerIds: [] };
+      if (!tournament.team.temporaryPlayerIds.includes(realTempPlayerId)) {
+        tournament.team.temporaryPlayerIds.push(realTempPlayerId);
+        await DB.put('tournaments', tournament);
+      }
+    }
+  }
+
   document.getElementById('tempPlayerFormOverlay')?.remove();
   Toast.show(I18n.t('tempp_saved'));
+
+  // Refresh the temp players list inside the still-open tournament form,
+  // if it's the one that triggered this — so a newly added or edited
+  // player appears immediately without closing and reopening anything.
+  const listEl = document.getElementById('tournTempPlayersList');
+  if (listEl && tournamentId) {
+    const tournament = await getTournamentById(tournamentId);
+    listEl.outerHTML = await renderTournamentTempPlayersList(tournament);
+  }
+}
+
+// Shows every temp player already linked to this tournament's team, each
+// with an Edit button — this was the actual missing piece: temp players
+// were being created but nothing ever displayed them afterward, so there
+// was no way to see, verify, or edit one once added.
+async function renderTournamentTempPlayersList(tournament) {
+  const linkedIds = tournament?.team?.temporaryPlayerIds || [];
+  if (!linkedIds.length) return '<div id="tournTempPlayersList"></div>';
+  const allTemp = await getTemporaryPlayersForSeason(tournament.seasonId);
+  const linked = allTemp.filter(tp => linkedIds.includes(tp.tempPlayerId));
+  return `
+    <div id="tournTempPlayersList" style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">${I18n.t('tempp_new_title')}</div>
+      ${linked.map(tp => `
+        <div class="wp-row" style="cursor:pointer" onclick="openTemporaryPlayerForm(${tp.tempPlayerId}, ${tournament.tournamentId})">
+          <div class="wp-info">
+            <span class="wp-num">${tp.shirtNumber||'—'}</span>
+            <span class="wp-name">${esc(tp.name)} ${tp.preferredPosition?`<span class="pos-pill">${esc(tp.preferredPosition)}</span>`:''}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
 async function saveTrainingPack(pack) {
