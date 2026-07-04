@@ -1898,6 +1898,7 @@ const TR = {
     tourn_name:'Tournament Name', tourn_location:'Location', tourn_category:'Category',
     tourn_start_date:'Start Date', tourn_end_date:'End Date', tourn_notes:'Notes',
     tourn_saved:'Tournament saved.', tourn_err_name_required:'Tournament name is required.',
+    tourn_err_duplicate:'A tournament named "{name}" already exists this season — using it instead.',
     tourn_section_title:'Tournaments', tourn_btn_create:'+ Create Tournament',
     tourn_empty:'No tournaments yet.',
     tempp_new_title:'Add Temporary Player', tempp_edit_title:'Edit Temporary Player',
@@ -2808,6 +2809,7 @@ const TR = {
     tourn_name:'Nome do Torneio', tourn_location:'Localização', tourn_category:'Categoria',
     tourn_start_date:'Data de Início', tourn_end_date:'Data de Fim', tourn_notes:'Notas',
     tourn_saved:'Torneio guardado.', tourn_err_name_required:'O nome do torneio é obrigatório.',
+    tourn_err_duplicate:'Já existe um torneio chamado "{name}" nesta época — a usar esse.',
     tourn_section_title:'Torneios', tourn_btn_create:'+ Criar Torneio',
     tourn_empty:'Ainda sem torneios.',
     tempp_new_title:'Adicionar Jogador Temporário', tempp_edit_title:'Editar Jogador Temporário',
@@ -5495,7 +5497,35 @@ function canArchivePack(pack, requestingAs, requestingOwnerId) {
 // ── TOURNAMENTS (Pass 1) ─────────────────────────────────────────────────────
 async function createTournament(tournament) {
   if (!tournament.team) tournament.team = { playerIds: [], temporaryPlayerIds: [] };
-  return DB.put('tournaments', tournament);
+
+  // Prevent duplicate tournaments for the same name in the same season —
+  // only applies when creating new (no tournamentId yet); editing an
+  // existing tournament is unaffected.
+  if (!tournament.tournamentId) {
+    const existingTournaments = await getTournamentsForSeason(tournament.seasonId);
+    const dup = existingTournaments.find(t => t.name.trim().toLowerCase() === tournament.name.trim().toLowerCase());
+    if (dup) {
+      Toast.error(I18n.t('tourn_err_duplicate', {name: dup.name}));
+      return dup.tournamentId;
+    }
+  }
+
+  const savedId = await DB.put('tournaments', tournament);
+  const realTournamentId = tournament.tournamentId || savedId;
+
+  // Auto-link: any game in this season whose competitionName matches this
+  // tournament's name (case-insensitive) but has no tournamentId yet gets
+  // linked now. Covers the case where games were imported BEFORE the
+  // tournament was created — the exact scenario reported.
+  const seasonGames = await DB.getAll('games', 'seasonId', tournament.seasonId);
+  const nameLower = tournament.name.trim().toLowerCase();
+  const toLink = seasonGames.filter(g => !g.tournamentId && (g.competitionName||'').trim().toLowerCase() === nameLower);
+  for (const g of toLink) {
+    g.tournamentId = realTournamentId;
+    await DB.put('games', g);
+  }
+
+  return realTournamentId;
 }
 async function getTournamentsForSeason(seasonId) {
   return DB.getAll('tournaments', 'seasonId', seasonId);
@@ -12307,6 +12337,7 @@ async function validateImportPlayers(rows) {
 
 async function validateImportGames(rows) {
   const existing = await DB.getAll('games', 'seasonId', State.currentSeasonId);
+  const seasonTournaments = await getTournamentsForSeason(State.currentSeasonId);
   const VALID_HOME_AWAY = ['Home', 'Away', 'Neutral'];
   return rows.map(r => {
     const date = (r.date||'').trim();
@@ -12320,6 +12351,13 @@ async function validateImportGames(rows) {
     const ha = haMatch || 'Home';
     const compType = (r.competitiontype||r['competition type']||'League').trim();
     const compName = (r.competitionname||r['competition name']||'').trim();
+    // Auto-link: if a tournament already exists this season with a name
+    // matching this row's Competition Name (case-insensitive), attach the
+    // imported game to it directly. Covers the case where the tournament
+    // was created BEFORE the games were imported.
+    const matchedTournament = compName
+      ? seasonTournaments.find(t => t.name.trim().toLowerCase() === compName.toLowerCase())
+      : null;
     const venue = (r.venue||r.ground||'').trim();
     const oppScore = parseInt(r.opponentscore||r['opponent score']||'0')||0;
     const notes = (r.notes||'').trim();
@@ -12339,6 +12377,7 @@ async function validateImportGames(rows) {
           seasonId: State.currentSeasonId,
           date, opponent: opp, homeAway: ha,
           competitionType: compType, competitionName: compName||null,
+          tournamentId: matchedTournament?.tournamentId || null,
           venue: venue||null, opponentScore: oppScore,
           teamNotes: notes||null, createdAt: new Date().toISOString(),
         }
@@ -12350,6 +12389,7 @@ async function validateImportGames(rows) {
         seasonId: State.currentSeasonId,
         date, opponent: opp, homeAway: ha,
         competitionType: compType, competitionName: compName||null,
+        tournamentId: matchedTournament?.tournamentId || null,
         venue: venue||null, opponentScore: oppScore,
         teamNotes: notes||null, createdAt: new Date().toISOString(),
       }
