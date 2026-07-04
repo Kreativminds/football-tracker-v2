@@ -884,6 +884,19 @@ function resolvePlayerName(gp, players, tempPlayers) {
   return '—';
 }
 
+// ── SHARED GAME DATE+TIME SORT KEY ───────────────────────────────────────────
+// Every sort of a games list previously used only `new Date(g.date)`, which
+// defaults to midnight — meaning two games on the same date (e.g. a
+// tournament's morning and afternoon match) sorted arbitrarily relative to
+// each other, with no regard for which actually kicks off first. This is
+// the single place that combines date + kickoff time into one comparable
+// value; every games .sort() call in the app should use this rather than
+// re-deriving the same logic separately at each call site.
+function gameSortKey(game) {
+  if (!game || !game.date) return 0;
+  return new Date(`${game.date}T${game.gameTime || '00:00'}`).getTime();
+}
+
 // ── GAME COMPLETION CHECK ────────────────────────────────────────────────────
 // A game's result/score is only "visible" elsewhere in the app once kick-off
 // time + match duration + buffer has passed. Before that, Home/Dashboard/
@@ -4147,7 +4160,7 @@ const Calc = (() => {
       streak:0, unbeaten:0, currentStreak:0, currentUnbeaten:0
     };
 
-    const sorted = [...games].sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const sorted = [...games].sort((a,b)=>gameSortKey(a)-gameSortKey(b));
     let streak=0, unbeaten=0, bestStreak=0, bestUnbeaten=0;
 
     sorted.forEach(g => {
@@ -6478,7 +6491,7 @@ async function renderExtendedStats(playerId) {
 
   const games = (await DB.getAll('games','seasonId',State.currentSeasonId))
     .filter(g => g.date)
-    .sort((a,b) => new Date(b.date)-new Date(a.date));
+    .sort((a,b) => gameSortKey(b)-gameSortKey(a));
 
   const allPGS = await DB.getAll('playerGameStats','playerId',playerId);
 
@@ -6931,7 +6944,7 @@ async function renderPlayerAchievements(playerId) {
   if (!player) return;
 
   const all = (await DB.getAll('achievements')).filter(a => !a.playerId || a.playerId === playerId);
-  all.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+  all.sort((a,b) => gameSortKey(b) - gameSortKey(a));
 
   const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
 
@@ -7769,7 +7782,7 @@ async function renderPlayerPortalStats() {
   const playerGP = allGP.filter(r => r.playerId === playerId);
   const s = Calc.lorenzoStats(finishedGames, playerGP);
 
-  const sortedGames = [...games].sort((a,b) => new Date(b.date) - new Date(a.date));
+  const sortedGames = [...games].sort((a,b) => gameSortKey(b) - gameSortKey(a));
   const last5 = sortedGames.slice(0,5);
   const posEntries = Object.entries(s.positionBreakdown).sort((a,b) => b[1]-a[1]);
 
@@ -7874,7 +7887,7 @@ async function renderPlayerPortalGames() {
   if (!el) return;
   const games = (await DB.getAll('games','seasonId', State.currentSeasonId)).filter(g => g.date);
   const allGP = await DB.getAll('gamePlayers','seasonId', State.currentSeasonId);
-  games.sort((a,b) => new Date(b.date) - new Date(a.date));
+  games.sort((a,b) => gameSortKey(b) - gameSortKey(a));
 
   el.innerHTML = `
     <div class="page-header"><div><h1>${I18n.t('pp_nav_games')}</h1></div></div>
@@ -8005,7 +8018,7 @@ async function renderPlayerPortalAchievements() {
   // achievements has no playerId index — fetch everything and filter here,
   // same pattern as the working guardian Achievements tab.
   const all = (await DB.getAll('achievements')).filter(a => a.playerId === playerId);
-  all.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+  all.sort((a,b) => gameSortKey(b) - gameSortKey(a));
   const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
 
   el.innerHTML = `
@@ -8625,7 +8638,7 @@ const Render = (() => {
       <!-- TRACKED PLAYERS -->
       ${trackedPlayers.map(tp => {
         const tpStats = Calc.playerSeasonStats(tp.playerId, finishedGames, allGP);
-        const tpGames = [...games].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
+        const tpGames = [...games].sort((a,b)=>gameSortKey(b)-gameSortKey(a)).slice(0,5);
         const formStrip = tpGames.map(g=>{
           const gp = allGP.find(r=>r.gameId===g.gameId && r.playerId===tp.playerId);
           const gps = allGP.filter(r=>r.gameId===g.gameId);
@@ -8802,7 +8815,7 @@ const Render = (() => {
     const sortKey = el.dataset.sortKey || 'date';
     const sortDir = el.dataset.sortDir || 'desc';
     const sortFns = {
-      date:            (a,b) => new Date(a.date||0) - new Date(b.date||0),
+      date:            (a,b) => gameSortKey(a) - gameSortKey(b),
       opponent:        (a,b) => (a.opponent||'').localeCompare(b.opponent||''),
       homeAway:        (a,b) => (a.homeAway||'').localeCompare(b.homeAway||''),
       competitionType: (a,b) => (a.competitionType||'').localeCompare(b.competitionType||''),
@@ -9006,7 +9019,7 @@ const Render = (() => {
       return `<th class="${extraClass}" style="cursor:pointer;user-select:none" onclick="overviewMatchSort(${playerId},'${key}')">${label}${arrow}</th>`;
     }
 
-    const sortedGames = [...games].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const sortedGames = [...games].sort((a,b)=>gameSortKey(b)-gameSortKey(a));
     const last5 = sortedGames.slice(0,5);
 
     // position breakdown
@@ -9301,7 +9314,7 @@ const Render = (() => {
     const el = document.getElementById('achievementsContent');
     const all = await DB.getAll('achievements');
     const filtered = all.filter(a=> !State.currentSeasonId || a.seasonId===State.currentSeasonId);
-    filtered.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    filtered.sort((a,b)=>gameSortKey(b)-gameSortKey(a));
 
     if (!filtered.length) {
       el.innerHTML = `<div class="empty"><strong>${I18n.t('ach_empty_title')}</strong><p>${I18n.t('ach_empty_desc')}</p></div>`;
@@ -11305,13 +11318,13 @@ async function renderSquadListTab(gameId) {
     if (thisGame?.tournamentId) {
       const tournamentGames = allSeasonGames
         .filter(g => g.gameId !== gameId && g.date && g.tournamentId === thisGame.tournamentId && (!thisGame.date || g.date <= thisGame.date))
-        .sort((a,b) => new Date(b.date) - new Date(a.date));
+        .sort((a,b) => gameSortKey(b) - gameSortKey(a));
       prevGame = tournamentGames[0] || null;
     }
     if (!prevGame) {
       const allGames = allSeasonGames
         .filter(g => g.gameId !== gameId && g.date && (!thisGame?.date || g.date <= thisGame.date))
-        .sort((a,b) => new Date(b.date) - new Date(a.date));
+        .sort((a,b) => gameSortKey(b) - gameSortKey(a));
       prevGame = allGames[0] || null;
     }
 
