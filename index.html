@@ -918,13 +918,16 @@ function isGameResultVisible(game) {
 // Home doesn't — the only real content difference between the two cards,
 // kept as a flag rather than duplicating the whole card markup twice.
 let _homeCarouselIndex = { guardian: 0, player: 0 };
-function renderNextGameCarousel(upcomingGames, containerId, showArrivalTime) {
+function renderNextGameCarousel(upcomingGames, containerId, showArrivalTime, actionButtonHtml) {
   const games = (upcomingGames || []).slice(0, 5);
   if (!games.length) {
     return `<div class="card" style="text-align:center;padding:24px"><p style="color:var(--muted);font-size:13px">${I18n.t('home_no_upcoming')}</p></div>`;
   }
   if (games.length === 1) {
-    return renderSingleNextGameCard(games[0], showArrivalTime);
+    return `<div class="card" style="border:2px solid #111">
+      ${renderSingleNextGameCard(games[0], showArrivalTime, true)}
+      ${actionButtonHtml ? `<div class="btn-group" style="margin-top:14px">${actionButtonHtml}</div>` : ''}
+    </div>`;
   }
 
   const scope = containerId; // 'guardian' or 'player' — keeps each page's carousel position independent
@@ -933,6 +936,7 @@ function renderNextGameCarousel(upcomingGames, containerId, showArrivalTime) {
   return `
     <div class="card" style="border:2px solid #111">
       ${renderSingleNextGameCard(game, showArrivalTime, true)}
+      ${actionButtonHtml ? `<div class="btn-group" style="margin-top:14px">${actionButtonHtml}</div>` : ''}
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
         <button type="button" onclick="shiftHomeCarousel('${scope}',-1,${games.length})" ${idx===0?'disabled':''} style="width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:#fff;font-size:16px;cursor:pointer;${idx===0?'opacity:.3':''}" aria-label="${I18n.t('home_carousel_prev')}">&#8249;</button>
         <div style="display:flex;gap:6px">
@@ -8406,10 +8410,7 @@ const Render = (() => {
     el.innerHTML = `
       <!-- NEXT GAME — primary focus -->
       ${upcoming.length ? `
-      ${renderNextGameCarousel(upcoming, 'guardian', true)}
-      <div class="btn-group" style="margin-top:14px">
-        <button class="btn btn-primary" onclick="goToGameDetail(${(upcoming[Math.min(_homeCarouselIndex.guardian||0, upcoming.length-1)]).gameId})">${I18n.t('home_btn_open_game')}</button>
-      </div>` : `
+      ${renderNextGameCarousel(upcoming, 'guardian', true, `<button class="btn btn-primary" onclick="goToGameDetail(${(upcoming[Math.min(_homeCarouselIndex.guardian||0, upcoming.length-1)]).gameId})">${I18n.t('home_btn_open_game')}</button>`)}` : `
       <div class="card" style="text-align:center;padding:24px">
         <div style="font-size:28px;margin-bottom:8px">&#128197;</div>
         <p style="color:var(--muted);font-size:13px">${I18n.t('home_no_upcoming')}</p>
