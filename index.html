@@ -965,19 +965,28 @@ function renderNextGameCarousel(upcomingGames, containerId, showArrivalTime, act
 // (the carousel) already provides its own wrapper, so the border/padding
 // isn't doubled up.
 function renderSingleNextGameCard(nextGame, showArrivalTime, innerCardOnly) {
+  // showArrivalTime distinguishes guardian (true, sees Arrive By + opens the
+  // full editable Game Detail) from player portal (false, sees a simpler
+  // card + opens the existing read-only game viewer popup already used
+  // elsewhere in the portal — same tap target, no new UI pattern invented).
+  const tapHandler = showArrivalTime
+    ? `goToGameDetail(${nextGame.gameId})`
+    : `openPortalGameViewer(${nextGame.gameId})`;
   const inner = `
-      <div class="card-title">&#9917; ${I18n.t('home_card_next_game')}</div>
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
-        <div>
-          <div style="font-size:18px;font-weight:700">${esc(nextGame.opponent)}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">${homeAwayLabel(nextGame.homeAway)} ${nextGame.venue?'· '+esc(nextGame.venue):''}</div>
-          <div style="font-size:13px;margin-top:8px">${fmtDate(nextGame.date)}${nextGame.gameTime?(showArrivalTime?' · Kick-off '+nextGame.gameTime:' · '+nextGame.gameTime):''}</div>
+      <div onclick="${tapHandler}" style="cursor:pointer">
+        <div class="card-title">&#9917; ${I18n.t('home_card_next_game')}</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:18px;font-weight:700">${esc(nextGame.opponent)}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${homeAwayLabel(nextGame.homeAway)} ${nextGame.venue?'· '+esc(nextGame.venue):''}</div>
+            <div style="font-size:13px;margin-top:8px">${fmtDate(nextGame.date)}${nextGame.gameTime?(showArrivalTime?' · Kick-off '+nextGame.gameTime:' · '+nextGame.gameTime):''}</div>
+          </div>
+          ${showArrivalTime && nextGame.arrivalTime?`
+          <div style="background:var(--black);color:#fff;padding:10px 16px;border-radius:4px;text-align:center">
+            <div style="font-size:9px;text-transform:uppercase;letter-spacing:.8px;opacity:.7">${I18n.t('home_arrive_by')}</div>
+            <div style="font-size:20px;font-weight:700">${nextGame.arrivalTime}</div>
+          </div>`:''}
         </div>
-        ${showArrivalTime && nextGame.arrivalTime?`
-        <div style="background:var(--black);color:#fff;padding:10px 16px;border-radius:4px;text-align:center">
-          <div style="font-size:9px;text-transform:uppercase;letter-spacing:.8px;opacity:.7">${I18n.t('home_arrive_by')}</div>
-          <div style="font-size:20px;font-weight:700">${nextGame.arrivalTime}</div>
-        </div>`:''}
       </div>`;
   return innerCardOnly ? inner : `<div class="card" style="border:2px solid #111">${inner}</div>`;
 }
@@ -1072,10 +1081,14 @@ function renderAuthGate() {
       </div>
     </div>
 
-    <!-- PLAYER ROLE — PIN for now, future Google/Facebook -->
+    <!-- PLAYER ROLE — Account Code + PIN, future Google/Facebook -->
     <div id="authRolePanel-player" style="display:none">
       <p style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:center">${I18n.t('acc_player_gate_intro')}</p>
       <div class="form-grid" style="margin-bottom:12px">
+        <div class="form-group full">
+          <label>${I18n.t('acc_lbl_account_code')}</label>
+          <input id="player-account-code" type="text" maxlength="6" placeholder="MAB482" style="width:100%;box-sizing:border-box;text-align:center;font-size:18px;letter-spacing:2px;text-transform:uppercase" autocomplete="off">
+        </div>
         <div class="form-group full">
           <label>${I18n.t('acc_lbl_pin')}</label>
           <div style="position:relative;width:100%">
@@ -1116,19 +1129,46 @@ function togglePinVisibility() {
 // requirement without depending on connectivity.
 async function handlePlayerPinSubmit() {
   const pinInput = document.getElementById('player-pin');
+  const codeInput = document.getElementById('player-account-code');
   const errEl = document.getElementById('player-pin-error');
   if (errEl) errEl.style.display = 'none';
   const enteredPin = pinInput?.value.trim();
+  const enteredCode = codeInput?.value.trim();
   if (!enteredPin) {
     if (errEl) { errEl.textContent = I18n.t('acc_err_pin_required'); errEl.style.display = ''; }
     return;
   }
 
+  // Fast path: this device already has the player's data locally (already
+  // synced at some point) — works fully offline, no network needed.
   const allPlayers = await DB.getAll('players');
-  const match = allPlayers.find(p => p.viewerPin && p.viewerPin === enteredPin);
+  let match = allPlayers.find(p => p.viewerPin && p.viewerPin === enteredPin);
+
+  // New-device path: nothing local matches — if an Account Code was given,
+  // try the secure server-side RPC instead. This is what makes PIN login
+  // work on a brand-new phone that's never synced with this account before.
   if (!match) {
-    if (errEl) { errEl.textContent = I18n.t('acc_err_pin_invalid'); errEl.style.display = ''; }
-    return;
+    if (!enteredCode) {
+      if (errEl) { errEl.textContent = I18n.t('acc_err_pin_invalid'); errEl.style.display = ''; }
+      return;
+    }
+    try {
+      const rpcResult = await Sync.validatePlayerPinRemote(enteredCode, enteredPin);
+      if (!rpcResult) {
+        if (errEl) { errEl.textContent = I18n.t('acc_err_pin_invalid'); errEl.style.display = ''; }
+        return;
+      }
+      // Pull down just this one player's data so the portal has something
+      // to actually show, then proceed with the normal login flow below.
+      match = await Sync.bootstrapPlayerFromRemote(rpcResult);
+      if (!match) {
+        if (errEl) { errEl.textContent = I18n.t('acc_err_pin_invalid'); errEl.style.display = ''; }
+        return;
+      }
+    } catch(err) {
+      if (errEl) { errEl.textContent = I18n.t('acc_err_pin_network', {msg: err.message}); errEl.style.display = ''; }
+      return;
+    }
   }
 
   State.portalPlayerId = match.playerId;
@@ -2412,6 +2452,7 @@ const TR = {
     acc_role_guardian:'Guardian', acc_role_player:'Player',
     acc_player_gate_intro:'Enter the PIN your guardian gave you to see your stats and training.',
     acc_lbl_pin:'PIN',
+    acc_lbl_account_code:'Account Code', acc_err_pin_network:'Could not check that Account Code — {msg}',
     acc_btn_player_login:'Enter',
     acc_player_pin_note:'Ask your guardian if you don\'t have a PIN yet.',
     acc_err_pin_required:'Enter your PIN.',
@@ -3323,6 +3364,7 @@ const TR = {
     acc_role_guardian:'Encarregado', acc_role_player:'Jogador',
     acc_player_gate_intro:'Introduza o PIN que o seu encarregado lhe deu para ver as suas estatísticas e treino.',
     acc_lbl_pin:'PIN',
+    acc_lbl_account_code:'Código da Conta', acc_err_pin_network:'Não foi possível verificar esse Código da Conta — {msg}',
     acc_btn_player_login:'Entrar',
     acc_player_pin_note:'Pergunte ao seu encarregado se ainda não tem um PIN.',
     acc_err_pin_required:'Introduza o seu PIN.',
@@ -7923,7 +7965,12 @@ async function openPortalGameViewer(gameId) {
   if (!game) return;
   const gp = await DB.getAll('gamePlayers', 'gameId', gameId);
   const players = await DB.getAll('players', 'seasonId', State.currentSeasonId);
-  const playerName = (id) => shortName(players.find(p => p.playerId === id)?.fullName || '—');
+  const tempPlayers = await getTemporaryPlayersForSeason(State.currentSeasonId);
+  // Was only ever checking season players — any tournament guest (temp
+  // player) recorded as a starter/sub/scorer/assister showed as blank or
+  // "—" here, since resolvePlayerName is the shared helper already built
+  // to correctly check both sources.
+  const playerName = (gpRow) => resolvePlayerName(gpRow, players, tempPlayers);
 
   const ourScore = Calc.teamGoals(gp);
   const theirScore = parseInt(game.opponentScore) || 0;
@@ -7953,17 +8000,17 @@ async function openPortalGameViewer(gameId) {
 
       ${visible && (scorers.length || assisters.length) ? `
       <div style="margin-bottom:14px">
-        ${scorers.map(r => `<div style="font-size:12px;margin-bottom:3px">&#9917; ${playerName(r.playerId)} ${r.goals>1?`x${r.goals}`:''}</div>`).join('')}
-        ${assisters.map(r => `<div style="font-size:12px;margin-bottom:3px;color:var(--muted)">&#127919; ${I18n.t('pp_assist_by')} ${playerName(r.playerId)}</div>`).join('')}
+        ${scorers.map(r => `<div style="font-size:12px;margin-bottom:3px">&#9917; ${playerName(r)} ${r.goals>1?`x${r.goals}`:''}</div>`).join('')}
+        ${assisters.map(r => `<div style="font-size:12px;margin-bottom:3px;color:var(--muted)">&#127919; ${I18n.t('pp_assist_by')} ${playerName(r)}</div>`).join('')}
       </div>` : ''}
 
       <div style="margin-bottom:10px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">${I18n.t('gd_role_starter')}</div>
-        ${calledUp.filter(r=>r.role==='Starter').map(r => `<div style="font-size:13px;padding:4px 0">${playerName(r.playerId)} ${r.positionPlayed?`<span class="pos-pill">${esc(r.positionPlayed)}</span>`:''} ${r.captain?'&#127894;':''}</div>`).join('') || `<div style="font-size:12px;color:var(--muted)">—</div>`}
+        ${calledUp.filter(r=>r.role==='Starter').map(r => `<div style="font-size:13px;padding:4px 0">${playerName(r)} ${r.positionPlayed?`<span class="pos-pill">${esc(r.positionPlayed)}</span>`:''} ${r.captain?'&#127894;':''}</div>`).join('') || `<div style="font-size:12px;color:var(--muted)">—</div>`}
       </div>
       <div style="margin-bottom:10px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">${I18n.t('gd_role_sub')}</div>
-        ${calledUp.filter(r=>r.role==='Sub').map(r => `<div style="font-size:13px;padding:4px 0">${playerName(r.playerId)} ${r.positionPlayed?`<span class="pos-pill">${esc(r.positionPlayed)}</span>`:''}</div>`).join('') || `<div style="font-size:12px;color:var(--muted)">—</div>`}
+        ${calledUp.filter(r=>r.role==='Sub').map(r => `<div style="font-size:13px;padding:4px 0">${playerName(r)} ${r.positionPlayed?`<span class="pos-pill">${esc(r.positionPlayed)}</span>`:''}</div>`).join('') || `<div style="font-size:12px;color:var(--muted)">—</div>`}
       </div>
       ${notCalledUp.length ? `
       <div style="margin-bottom:10px">
@@ -10329,6 +10376,49 @@ const Sync = (() => {
     return text ? JSON.parse(text) : [];
   }
 
+  // ── PLAYER PIN LOGIN — new device, no prior login ─────────────────────────
+  // Deliberately separate from supabaseRequest above: this must work with
+  // NO authentication at all, using only the public anon key — that's the
+  // whole point of the Account Code + PIN flow. Calls the server-side RPC
+  // (validate_player_pin), which does the real lookup safely; the client
+  // never gets direct read access to the players table.
+  async function validatePlayerPinRemote(accountCode, pin) {
+    if (!isConfigured()) throw new Error('Sync not configured on this device.');
+    const base = _cfg.url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '') + '/rest/v1/';
+    const res = await fetch(base + 'rpc/validate_player_pin', {
+      method: 'POST',
+      headers: {
+        'apikey':       _cfg.anonKey,
+        'Authorization':'Bearer ' + _cfg.anonKey, // anon key doubles as the bearer here — no user session exists yet
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_account_code: accountCode, p_pin: pin }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error('Lookup failed: ' + res.status + ' ' + err.slice(0,200));
+    }
+    const rows = await res.json();
+    return rows && rows.length ? rows[0] : null; // { parent_user_id, player_local_id, player_name }
+  }
+
+  // Pulls down just enough to open the portal for a player matched via the
+  // remote RPC above — a minimal player record, not the guardian's full
+  // dataset. Stored locally afterward so subsequent logins on this same
+  // device use the fast local-match path instead of hitting the network
+  // again every time.
+  async function bootstrapPlayerFromRemote(rpcResult) {
+    const { parent_user_id, player_local_id, player_name } = rpcResult;
+    const minimalPlayer = {
+      playerId: parseInt(player_local_id),
+      fullName: player_name,
+      isActive: true,
+      remoteOwnerUserId: parent_user_id, // kept for reference; not used for any local security decision
+    };
+    await DB.put('players', minimalPlayer);
+    return minimalPlayer;
+  }
+
   async function testConnection() {
     if (!isConfigured()) return { ok: false, msg: 'Missing URL or key.' };
     if (!Auth.isLoggedIn()) return { ok: false, msg: 'Not logged in.' };
@@ -10609,7 +10699,7 @@ const Sync = (() => {
     }
   }
 
-  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable };
+  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote };
 })();
 
 function attachEvents() {
@@ -11313,17 +11403,18 @@ async function renderSquadListTab(gameId) {
     // tournament, or it's the tournament's first game with nothing earlier
     // to copy from.
     const thisGame = await DB.get('games', gameId);
+    const thisGameKey = gameSortKey(thisGame);
     const allSeasonGames = await DB.getAll('games','seasonId', State.currentSeasonId);
     let prevGame = null;
     if (thisGame?.tournamentId) {
       const tournamentGames = allSeasonGames
-        .filter(g => g.gameId !== gameId && g.date && g.tournamentId === thisGame.tournamentId && (!thisGame.date || g.date <= thisGame.date))
+        .filter(g => g.gameId !== gameId && g.date && g.tournamentId === thisGame.tournamentId && gameSortKey(g) < thisGameKey)
         .sort((a,b) => gameSortKey(b) - gameSortKey(a));
       prevGame = tournamentGames[0] || null;
     }
     if (!prevGame) {
       const allGames = allSeasonGames
-        .filter(g => g.gameId !== gameId && g.date && (!thisGame?.date || g.date <= thisGame.date))
+        .filter(g => g.gameId !== gameId && g.date && gameSortKey(g) < thisGameKey)
         .sort((a,b) => gameSortKey(b) - gameSortKey(a));
       prevGame = allGames[0] || null;
     }
