@@ -1087,7 +1087,7 @@ function renderAuthGate() {
       <div class="form-grid" style="margin-bottom:12px">
         <div class="form-group full">
           <label>${I18n.t('acc_lbl_account_code')}</label>
-          <input id="player-account-code" type="text" maxlength="6" placeholder="MAB482" style="width:100%;box-sizing:border-box;text-align:center;font-size:18px;letter-spacing:2px;text-transform:uppercase" autocomplete="off">
+          <input id="player-account-code" type="text" maxlength="20" placeholder="e.g. SMITH123" style="width:100%;box-sizing:border-box;text-align:center;font-size:18px;letter-spacing:2px;text-transform:uppercase" autocomplete="off">
         </div>
         <div class="form-group full">
           <label>${I18n.t('acc_lbl_pin')}</label>
@@ -1325,7 +1325,7 @@ async function renderAccountCodeBlock() {
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
           <p style="font-size:11px;color:var(--muted);margin-bottom:6px">${I18n.t('acc_code_claim_intro')}</p>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input id="claim-code-input" type="text" maxlength="20" placeholder="VMABERE" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:14px;letter-spacing:1px;text-transform:uppercase">
+            <input id="claim-code-input" type="text" maxlength="20" placeholder="e.g. SMITH123" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:14px;letter-spacing:1px;text-transform:uppercase">
             <button class="btn btn-primary btn-sm" onclick="handleClaimAccountCode()">${I18n.t('acc_btn_claim_code')}</button>
           </div>
           <div id="claim-code-error" style="display:none;font-size:11px;color:#b03030;margin-top:6px"></div>
@@ -2549,7 +2549,7 @@ const TR = {
     acc_code_hint:'Share this code with your player, along with their PIN, so they can log in on a new phone.',
     acc_code_hint_short:'Share this with the PIN above for login on a new phone.',
     acc_code_locked_note:'This Account Code is permanent and cannot be changed.',
-    acc_code_claim_intro:'Want an easier code to remember? Set a permanent one now — once saved, it cannot be changed.',
+    acc_code_claim_intro:'Want an easier code to remember? Set a permanent one now — 4 to 20 letters and numbers only, no spaces or symbols. Once saved, it cannot be changed.',
     acc_btn_claim_code:'Claim Code',
     acc_code_claim_confirm:'Set "{code}" as your permanent Account Code? This cannot be undone.',
     acc_code_claimed:'Your Account Code is now permanent.',
@@ -3473,7 +3473,7 @@ const TR = {
     acc_code_hint:'Partilhe este código com o seu jogador, junto com o PIN dele, para que possa iniciar sessão num novo telemóvel.',
     acc_code_hint_short:'Partilhe isto com o PIN acima para iniciar sessão num novo telemóvel.',
     acc_code_locked_note:'Este Código da Conta é permanente e não pode ser alterado.',
-    acc_code_claim_intro:'Quer um código mais fácil de lembrar? Defina um permanente agora — depois de guardado, não pode ser alterado.',
+    acc_code_claim_intro:'Quer um código mais fácil de lembrar? Defina um permanente agora — entre 4 e 20 letras e números, sem espaços ou símbolos. Depois de guardado, não pode ser alterado.',
     acc_btn_claim_code:'Reivindicar Código',
     acc_code_claim_confirm:'Definir "{code}" como o seu Código da Conta permanente? Isto não pode ser desfeito.',
     acc_code_claimed:'O seu Código da Conta é agora permanente.',
