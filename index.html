@@ -10608,6 +10608,9 @@ const Sync = (() => {
     for (const store of SYNC_STORES) {
       let records;
       try { records = await DB.getAll(store); } catch(e) { continue; }
+      if (store === 'players') {
+        records.forEach(r => log(`[DEBUG players] key=${r.playerId} syncStatus=${r.syncStatus} viewerPin=${r.viewerPin}`));
+      }
       const pending = records.filter(r => r.syncStatus === 'local' || r.syncStatus === 'modified');
       for (const record of pending) {
         const localId = String(record[getKey(store)]);
