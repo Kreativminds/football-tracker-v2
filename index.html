@@ -1235,7 +1235,7 @@ async function handleEmergencyBypass() {
 // ── ACCOUNT CARD — Settings → Cloud Sync tab ─────────────────────────────────
 // Login is only required to enable cloud sync. The app works fully offline,
 // with full local data, whether or not anyone is signed in.
-function renderAccountCard() {
+async function renderAccountCard() {
   const el = document.getElementById('accountCard');
   if (!el) return;
 
@@ -1248,8 +1248,15 @@ function renderAccountCard() {
         </div>
         <button class="btn btn-secondary btn-sm" onclick="handleLogout()">${I18n.t('acc_btn_logout')}</button>
       </div>
+      <div id="accountCodeBlock" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;color:var(--muted)">${I18n.t('acc_loading_code')}</div>
+      </div>
       <p style="font-size:11px;color:var(--muted);margin-top:10px">${I18n.t('acc_logged_in_note')}</p>
     `;
+    // Fetched separately, after the card itself renders — this needs a
+    // network round-trip to the profiles table, so the rest of the card
+    // (email, logout) shouldn't wait on it.
+    renderAccountCodeBlock();
     return;
   }
 
@@ -1266,6 +1273,32 @@ function renderAccountCard() {
     <div id="acc-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
     <button class="btn btn-primary" id="acc-submit-btn" onclick="handleAccountSubmit()">${I18n.t('acc_btn_login')}</button>
   `;
+}
+
+// Fetches this guardian's Account Code from the profiles table and shows
+// it plainly, with a one-tap copy — this is the code shared with a player
+// on a new device, alongside their own PIN, per the new login flow.
+async function renderAccountCodeBlock() {
+  const blockEl = document.getElementById('accountCodeBlock');
+  if (!blockEl) return;
+  try {
+    const rows = await Sync.fetchOwnProfile();
+    if (!rows || !rows.length) {
+      blockEl.innerHTML = `<div style="font-size:11px;color:var(--muted)">${I18n.t('acc_code_unavailable')}</div>`;
+      return;
+    }
+    const code = rows[0].account_code;
+    blockEl.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">${I18n.t('acc_account_code_label')}</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:22px;font-weight:700;letter-spacing:2px">${esc(code)}</div>
+        <button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('${esc(code)}');Toast.show(I18n.t('acc_code_copied'))">${I18n.t('acc_btn_copy')}</button>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">${I18n.t('acc_code_hint')}</p>
+    `;
+  } catch(err) {
+    blockEl.innerHTML = `<div style="font-size:11px;color:var(--muted)">${I18n.t('acc_code_unavailable')}</div>`;
+  }
 }
 
 let _accountFormMode = 'login';
@@ -2453,6 +2486,11 @@ const TR = {
     acc_player_gate_intro:'Enter the PIN your guardian gave you to see your stats and training.',
     acc_lbl_pin:'PIN',
     acc_lbl_account_code:'Account Code', acc_err_pin_network:'Could not check that Account Code — {msg}',
+    acc_loading_code:'Loading your Account Code...',
+    acc_account_code_label:'Your Account Code',
+    acc_code_hint:'Share this code with your player, along with their PIN, so they can log in on a new phone.',
+    acc_code_unavailable:'Account Code unavailable right now — check your connection and try again.',
+    acc_btn_copy:'Copy', acc_code_copied:'Account Code copied.',
     acc_btn_player_login:'Enter',
     acc_player_pin_note:'Ask your guardian if you don\'t have a PIN yet.',
     acc_err_pin_required:'Enter your PIN.',
@@ -3365,6 +3403,11 @@ const TR = {
     acc_player_gate_intro:'Introduza o PIN que o seu encarregado lhe deu para ver as suas estatísticas e treino.',
     acc_lbl_pin:'PIN',
     acc_lbl_account_code:'Código da Conta', acc_err_pin_network:'Não foi possível verificar esse Código da Conta — {msg}',
+    acc_loading_code:'A carregar o seu Código da Conta...',
+    acc_account_code_label:'O Seu Código da Conta',
+    acc_code_hint:'Partilhe este código com o seu jogador, junto com o PIN dele, para que possa iniciar sessão num novo telemóvel.',
+    acc_code_unavailable:'Código da Conta indisponível de momento — verifique a sua ligação e tente novamente.',
+    acc_btn_copy:'Copiar', acc_code_copied:'Código da Conta copiado.',
     acc_btn_player_login:'Entrar',
     acc_player_pin_note:'Pergunte ao seu encarregado se ainda não tem um PIN.',
     acc_err_pin_required:'Introduza o seu PIN.',
@@ -10376,6 +10419,16 @@ const Sync = (() => {
     return text ? JSON.parse(text) : [];
   }
 
+  // ── ACCOUNT CODE — shown on the guardian's own Settings screen ─────────────
+  // Uses the normal authenticated request path (supabaseRequest), not the
+  // anon-only path above — the guardian is already logged in when viewing
+  // this, so this correctly goes through their own session and RLS's
+  // "own_profile_select" policy (auth.uid() = id), never exposing anyone
+  // else's code.
+  async function fetchOwnProfile() {
+    return supabaseRequest('GET', 'profiles', null, { id: 'eq.' + Auth.getUserId() });
+  }
+
   // ── PLAYER PIN LOGIN — new device, no prior login ─────────────────────────
   // Deliberately separate from supabaseRequest above: this must work with
   // NO authentication at all, using only the public anon key — that's the
@@ -10699,7 +10752,7 @@ const Sync = (() => {
     }
   }
 
-  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote };
+  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote, fetchOwnProfile };
 })();
 
 function attachEvents() {
