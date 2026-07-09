@@ -12247,6 +12247,18 @@ async function renderPenaltiesTab(gameId) {
     const theirPenaltyTotal = parseInt(game.penaltiesForThem) || 0;
     const shootoutWinner = ourPenaltyTotal === theirPenaltyTotal ? null : (ourPenaltyTotal > theirPenaltyTotal ? 'us' : 'them');
 
+    // Keep game.ourPenaltyGoals in sync with the real live total every
+    // time this tab renders — not just when an individual input changes.
+    // This was the actual bug: the tab always computed its own total
+    // correctly from gamePlayers directly, but the Home page and Games
+    // list read the separately-stored game.ourPenaltyGoals field, which
+    // could fall out of sync with the true total and silently show 0-0
+    // everywhere except this one tab.
+    if (game.ourPenaltyGoals !== ourPenaltyTotal) {
+      game.ourPenaltyGoals = ourPenaltyTotal;
+      await DB.put('games', game);
+    }
+
     el.innerHTML = `
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('gd_shootout_hint')}</p>
       <div class="goals-list">
