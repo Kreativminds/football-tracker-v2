@@ -683,14 +683,23 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
         </div>
         <input type="hidden" id="gf-id">
       </div>
-      <div class="search-bar">
-        <input type="text" id="gamesSearch" data-i18n-placeholder="games_search_placeholder" placeholder="Search games...">
-        <select id="gamesFilter" style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
-          <option value="" data-i18n="games_all_competitions">All competitions</option>
-          <option value="League" data-i18n="comp_league">League</option><option value="Cup" data-i18n="comp_cup">Cup</option><option value="Friendly" data-i18n="comp_friendly">Friendly</option><option value="Tournament" data-i18n="comp_tournament">Tournament</option><option value="Trial" data-i18n="comp_trial">Trial</option>
-        </select>
+      <div class="tab-bar-row" style="margin-bottom:14px">
+        <button class="import-tab active-tab" id="gamestab-main" onclick="switchGamesMainTab('main')">${I18n.t('games_tab_main')}</button>
+        <button class="import-tab" id="gamestab-tournaments" onclick="switchGamesMainTab('tournaments')">${I18n.t('games_tab_tournaments')}</button>
       </div>
-      <div id="gamesContent"></div>
+      <div id="gamesMainView">
+        <div class="search-bar">
+          <input type="text" id="gamesSearch" data-i18n-placeholder="games_search_placeholder" placeholder="Search games...">
+          <select id="gamesFilter" style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px">
+            <option value="" data-i18n="games_all_competitions">All competitions</option>
+            <option value="League" data-i18n="comp_league">League</option><option value="Cup" data-i18n="comp_cup">Cup</option><option value="Friendly" data-i18n="comp_friendly">Friendly</option><option value="Trial" data-i18n="comp_trial">Trial</option>
+          </select>
+        </div>
+        <div id="gamesContent"></div>
+      </div>
+      <div id="gamesTournamentsView" style="display:none">
+        <div id="gamesTournamentsContent"></div>
+      </div>
     </div>
     <div id="gameDetailView" style="display:none">
       <button class="back-btn" id="btnBackToGames">← <span data-i18n="games_back_to_games">Back to Games</span></button>
@@ -1001,11 +1010,16 @@ function isGameEditable(game, season) {
   const now = new Date();
   const gameDateTime = new Date(`${game.date}T${game.gameTime || '00:00'}`);
   if (isNaN(gameDateTime)) return true;
-  const PRE_KICKOFF_GRACE_MINS = 30; // editable slightly before kickoff too, for pre-match squad selection
-  const preKickoff = new Date(gameDateTime.getTime() - PRE_KICKOFF_GRACE_MINS * 60000);
+  // A game that hasn't started yet (any time before kickoff — a week away,
+  // a day away, or five minutes away) is always editable, with no lower
+  // bound at all. This matters specifically during a live match too: an
+  // in-progress game must stay freely editable the whole way through so
+  // updates can be made quickly as things happen, not gated behind an
+  // Edit button. Only once kickoff + the resolved match duration has
+  // fully passed does it lock by default.
   const durationMins = resolveMatchDuration(game, season);
   const windowEnd = new Date(gameDateTime.getTime() + durationMins * 60000);
-  return now >= preKickoff && now <= windowEnd;
+  return now <= windowEnd;
 }
 
 // ── NEXT GAME(S) CAROUSEL — shared by guardian and player Home pages ────────
@@ -2217,6 +2231,8 @@ const TR = {
     games_lbl_notes:'Team Notes',
     games_search_placeholder:'Search games...',
     games_all_competitions:'All competitions',
+    games_tab_main:'League & Friendlies', games_tab_tournaments:'Tournaments',
+    tourn_games_count_suffix:'games', tourn_no_games_yet:'No games added to this tournament yet.',
     games_no_games_title:'No games logged yet',
     games_no_games_desc:'Add your first game using the button above.',
     games_back_to_games:'Back to Games',
@@ -3165,6 +3181,8 @@ const TR = {
     games_lbl_notes:'Notas da Equipa',
     games_search_placeholder:'Pesquisar jogos...',
     games_all_competitions:'Todas as competições',
+    games_tab_main:'Liga e Amigáveis', games_tab_tournaments:'Torneios',
+    tourn_games_count_suffix:'jogos', tourn_no_games_yet:'Ainda sem jogos adicionados a este torneio.',
     games_no_games_title:'Ainda sem jogos registados',
     games_no_games_desc:'Adicione o seu primeiro jogo usando o botão acima.',
     games_back_to_games:'Voltar aos Jogos',
@@ -5948,29 +5966,69 @@ async function saveTournamentFromForm(tournamentId) {
   await createTournament(tournament);
   document.getElementById('tournamentFormOverlay')?.remove();
   Toast.show(I18n.t('tourn_saved'));
-  renderTournamentsList();
+  renderTournamentGamesTab();
 }
 
-async function renderTournamentsList() {
-  const el = document.getElementById('tournamentsListPanel');
+// ── GAMES PAGE — MAIN / TOURNAMENTS TAB SWITCH ──────────────────────────────
+function switchGamesMainTab(tab) {
+  const mainView = document.getElementById('gamesMainView');
+  const tournView = document.getElementById('gamesTournamentsView');
+  const mainBtn = document.getElementById('gamestab-main');
+  const tournBtn = document.getElementById('gamestab-tournaments');
+  if (mainView) mainView.style.display = tab === 'main' ? '' : 'none';
+  if (tournView) tournView.style.display = tab === 'tournaments' ? '' : 'none';
+  if (mainBtn) mainBtn.classList.toggle('active-tab', tab === 'main');
+  if (tournBtn) tournBtn.classList.toggle('active-tab', tab === 'tournaments');
+  if (tab === 'tournaments') renderTournamentGamesTab();
+}
+
+// Shows every tournament this season, each with its own linked games
+// listed underneath — genuinely separated from the main League/Cup/
+// Friendly/Trial list, not just filtered within one shared table.
+async function renderTournamentGamesTab() {
+  const el = document.getElementById('gamesTournamentsContent');
   if (!el) return;
   const tournaments = await getTournamentsForSeason(State.currentSeasonId);
   tournaments.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
+  const allGames = await DB.getAll('games','seasonId',State.currentSeasonId);
+  const allGP = await DB.getAll('gamePlayers','seasonId',State.currentSeasonId);
+
   el.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">${I18n.t('tourn_section_title')}</div>
       <button type="button" class="btn btn-secondary btn-sm" onclick="openTournamentForm(null)">${I18n.t('tourn_btn_create')}</button>
     </div>
-    ${!tournaments.length ? `<p style="font-size:12px;color:var(--muted)">${I18n.t('tourn_empty')}</p>` : `
-    <div class="who-played-list">
-      ${tournaments.map(t => `
-        <div class="wp-row" style="cursor:pointer" onclick="openTournamentForm(${t.tournamentId})">
-          <div class="wp-info">
-            <span class="wp-name">${esc(t.name)}</span>
-            <span class="pos-pill" style="margin-left:auto">${t.startDate?fmtDate(t.startDate):'—'}</span>
+    ${!tournaments.length ? `<div class="empty"><strong>${I18n.t('tourn_empty')}</strong></div>` : tournaments.map(t => {
+      const tGames = allGames.filter(g => g.tournamentId === t.tournamentId)
+        .sort((a,b) => gameSortKey(a) - gameSortKey(b));
+      return `
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;cursor:pointer" onclick="openTournamentForm(${t.tournamentId})">
+          <div>
+            <div style="font-weight:700;font-size:14px">${esc(t.name)}</div>
+            <div style="font-size:11px;color:var(--muted)">${t.location?esc(t.location)+' · ':''}${t.startDate?fmtDate(t.startDate):'—'}</div>
           </div>
-        </div>`).join('')}
-    </div>`}
+          <span class="pos-pill">${tGames.length} ${I18n.t('tourn_games_count_suffix')}</span>
+        </div>
+        ${!tGames.length ? `<p style="font-size:12px;color:var(--muted)">${I18n.t('tourn_no_games_yet')}</p>` : `
+        <div class="who-played-list">
+          ${tGames.map(g => {
+            const gps = allGP.filter(r => r.gameId === g.gameId);
+            const our = Calc.teamGoals(gps, g);
+            const their = parseInt(g.opponentScore)||0;
+            const res = Calc.result(our, their, g);
+            const visible = isGameResultVisible(g);
+            return `<div class="wp-row" style="cursor:pointer" onclick="openGameDetail(${g.gameId})">
+              <div class="wp-info">
+                <span class="wp-name">${esc(g.opponent)}</span>
+                <span class="pos-pill" style="margin-left:auto">${g.date?fmtDate(g.date):'—'}</span>
+                ${visible?`<span class="badge badge-${res}" style="margin-left:6px">${res}</span>`:`<span class="pos-pill" style="margin-left:6px">${I18n.t('games_status_upcoming')}</span>`}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`}
+      </div>`;
+    }).join('')}
   `;
 }
 
@@ -9234,15 +9292,11 @@ const Render = (() => {
     if (!State.currentSeason) { el.innerHTML = noSeason(); return; }
     sub.textContent = State.currentSeason.seasonName;
 
-    // Tournaments panel — rendered into its own container above the games
-    // table so it's visible even when there are no games yet. Injected once
-    // here; renderTournamentsList() re-fills it independently afterward.
-    if (!document.getElementById('tournamentsListPanel')) {
-      el.insertAdjacentHTML('beforebegin', '<div class="card" style="margin-bottom:14px"><div id="tournamentsListPanel"></div></div>');
-    }
-    renderTournamentsList();
-
-    let games = await DB.getAll('games','seasonId',State.currentSeasonId);
+    // Tournament games now live entirely in their own tab (see
+    // renderTournamentGamesTab) — excluded here so the main list only
+    // ever shows League/Cup/Friendly/Trial games, genuinely separated
+    // rather than just labeled differently in one shared list.
+    let games = (await DB.getAll('games','seasonId',State.currentSeasonId)).filter(g => !g.tournamentId);
     if (search) games = games.filter(g=>g.opponent.toLowerCase().includes(search.toLowerCase()));
     if (compFilter) games = games.filter(g=>g.competitionType===compFilter);
 
