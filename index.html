@@ -2140,7 +2140,7 @@ const TR = {
     games_not_found:'Game not found.',
 
     // ── GAME DETAIL ──
-    gd_tab_squad:'Squad List', gd_tab_xi:'Starting XI', gd_tab_goals:'Goals',
+    gd_tab_squad:'Squad List', gd_tab_xi:'Starting XI', gd_tab_goals:'Goals', gd_tab_penalties:'Penalties',
     gd_autosave_note:'Changes save automatically — no Save button needed.',
     gd_btn_back:'Back to Games',
     gd_squad_hint:"Tap a player to add them to the squad for this game. Use this as soon as you know who's available — before match day.",
@@ -2164,6 +2164,7 @@ const TR = {
     gd_shootout_title:'Penalty Shootout', gd_shootout_hint:'Tap each of our players who scored their penalty. This does not change the match score or player goal stats.',
     gd_shootout_our_scorers:'Our Scorers', gd_shootout_their_scorers:'Their Penalties',
     gd_shootout_score_line:'Shootout: {ours} — {theirs}',
+    gd_shootout_lbl_scored:'Scored', gd_shootout_we_won:'We won the shootout', gd_shootout_we_lost:'We lost the shootout',
     gd_lbl_goals:'Goals', gd_lbl_assists:'Assists',
     gd_added_to_squad:'Added to squad', gd_removed_from_squad:'Removed from squad',
     gd_could_not_save:'Could not save: {msg}',
@@ -3076,7 +3077,7 @@ const TR = {
     games_not_found:'Jogo não encontrado.',
 
     // ── GAME DETAIL ──
-    gd_tab_squad:'Convocados', gd_tab_xi:'Onze Inicial', gd_tab_goals:'Golos',
+    gd_tab_squad:'Convocados', gd_tab_xi:'Onze Inicial', gd_tab_goals:'Golos', gd_tab_penalties:'Grandes Penalidades',
     gd_autosave_note:'As alterações são guardadas automaticamente — não é necessário gravar.',
     gd_btn_back:'Voltar aos Jogos',
     gd_squad_hint:'Toque num jogador para o adicionar à convocatória deste jogo. Use isto assim que souber quem está disponível — antes do dia do jogo.',
@@ -3100,6 +3101,7 @@ const TR = {
     gd_shootout_title:'Grande Penalidades', gd_shootout_hint:'Toque em cada jogador nosso que marcou o seu penálti. Isto não altera o resultado do jogo nem as estatísticas de golos dos jogadores.',
     gd_shootout_our_scorers:'Os Nossos Marcadores', gd_shootout_their_scorers:'Penáltis Deles',
     gd_shootout_score_line:'Grandes Penalidades: {ours} — {theirs}',
+    gd_shootout_lbl_scored:'Marcou', gd_shootout_we_won:'Ganhámos as grandes penalidades', gd_shootout_we_lost:'Perdemos as grandes penalidades',
     gd_lbl_goals:'Golos', gd_lbl_assists:'Assistências',
     gd_added_to_squad:'Adicionado à convocatória', gd_removed_from_squad:'Removido da convocatória',
     gd_could_not_save:'Não foi possível guardar: {msg}',
@@ -4277,14 +4279,14 @@ const Calc = (() => {
 
   // Third parameter is optional and backward compatible — every existing
   // 2-argument call behaves exactly as before. When a game object is
-  // passed and the match is level, a recorded shootout (penaltyScorerIds
+  // passed and the match is level, a recorded shootout (ourPenaltyGoals
   // vs penaltiesForThem) decides the result as a win or loss, matching
   // real football convention — a shootout win is recorded as a W, not a D,
   // even though the scoreline itself stays as the actual draw.
   function result(ourGoals, theirGoals, game) {
     const o = parseInt(ourGoals)||0, t = parseInt(theirGoals)||0;
-    if (o === t && game && game.penaltyScorerIds && (game.penaltiesForThem !== undefined && game.penaltiesForThem !== null)) {
-      const ourPens = game.penaltyScorerIds.length;
+    if (o === t && game && (game.ourPenaltyGoals !== undefined && game.ourPenaltyGoals !== null) && (game.penaltiesForThem !== undefined && game.penaltiesForThem !== null)) {
+      const ourPens = parseInt(game.ourPenaltyGoals) || 0;
       const theirPens = parseInt(game.penaltiesForThem) || 0;
       if (ourPens !== theirPens) return ourPens > theirPens ? 'W' : 'L';
     }
@@ -9218,6 +9220,7 @@ const Render = (() => {
         <button class="import-tab ${currentTab==='squad'?'active-tab':''}" id="gdtab-squad" onclick="switchSimpleTab(${gameId},'squad')">${I18n.t('gd_tab_squad')}</button>
         <button class="import-tab ${currentTab==='xi'?'active-tab':''}" id="gdtab-xi" onclick="switchSimpleTab(${gameId},'xi')">${I18n.t('gd_tab_xi')}</button>
         <button class="import-tab ${currentTab==='goals'?'active-tab':''}" id="gdtab-goals" onclick="switchSimpleTab(${gameId},'goals')">${I18n.t('gd_tab_goals')}</button>
+        ${game.tournamentId ? `<button class="import-tab ${currentTab==='penalties'?'active-tab':''}" id="gdtab-penalties" onclick="switchSimpleTab(${gameId},'penalties')">${I18n.t('gd_tab_penalties')}</button>` : ''}
       </div>
       <div style="font-size:11px;color:#2a7a3b;margin-bottom:10px">&#10003; ${I18n.t('gd_autosave_note')}</div>
 
@@ -9226,6 +9229,7 @@ const Render = (() => {
       <div id="gdPanel-squad" style="${currentTab==='squad'?'':'display:none'}"></div>
       <div id="gdPanel-xi" style="${currentTab==='xi'?'':'display:none'}"></div>
       <div id="gdPanel-goals" style="${currentTab==='goals'?'':'display:none'}"></div>
+      ${game.tournamentId ? `<div id="gdPanel-penalties" style="${currentTab==='penalties'?'':'display:none'}"></div>` : ''}
 
       <div style="margin-top:10px">
         <button class="btn btn-secondary" onclick="closeGameDetail()">&#8592; ${I18n.t('gd_btn_back')}</button>
@@ -11680,15 +11684,16 @@ async function switchSimpleTab(gameId, tab) {
   gdDebugLog(`switchSimpleTab -> ${tab}`);
   State.gameDetailTab = tab;
   try { sessionStorage.setItem('squadTracker_gameDetailTab', tab); } catch(e) {}
-  ['squad','xi','goals'].forEach(t => {
+  ['squad','xi','goals','penalties'].forEach(t => {
     const panel = document.getElementById(`gdPanel-${t}`);
     const btn   = document.getElementById(`gdtab-${t}`);
     if (panel) panel.style.display = t === tab ? '' : 'none';
     if (btn)   btn.classList.toggle('active-tab', t === tab);
   });
-  if (tab === 'squad') await renderSquadListTab(gameId);
-  if (tab === 'xi')    await renderStartingXITab(gameId);
-  if (tab === 'goals') await renderSimpleGoalsTab(gameId);
+  if (tab === 'squad')     await renderSquadListTab(gameId);
+  if (tab === 'xi')        await renderStartingXITab(gameId);
+  if (tab === 'goals')     await renderSimpleGoalsTab(gameId);
+  if (tab === 'penalties') await renderPenaltiesTab(gameId);
 }
 
 // ── TAB 1 — SQUAD LIST ───────────────────────────────────────────────────────
@@ -12006,39 +12011,6 @@ async function renderSimpleGoalsTab(gameId) {
         </div>
       </div>`;
 
-    // Penalty shootout only applies when the match is genuinely level —
-    // it has no meaning otherwise, and showing it unconditionally would be
-    // confusing clutter on every normal game.
-    const ourCurrentScore = Calc.teamGoals(existingGP, game);
-    const theirCurrentScore = parseInt(game?.opponentScore) || 0;
-    const isLevel = ourCurrentScore === theirCurrentScore;
-    const penaltyScorerIds = game?.penaltyScorerIds || [];
-
-    const shootoutPanel = isLevel ? `
-      <div class="card" style="margin-bottom:14px;padding:14px">
-        <div class="card-title" style="margin-bottom:8px">${I18n.t('gd_shootout_title')}</div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">${I18n.t('gd_shootout_hint')}</p>
-        <div style="margin-bottom:12px">
-          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:6px">${I18n.t('gd_shootout_our_scorers')}</label>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${squad.map(p => {
-              const scored = penaltyScorerIds.includes(p.playerId);
-              return `<button type="button" onclick="togglePenaltyScorer(${gameId},${p.playerId})" style="padding:6px 10px;border-radius:6px;border:2px solid ${scored?'#2a7a4e':'var(--border)'};background:${scored?'#e6f4ea':'#fff'};color:${scored?'#2a7a4e':'var(--dark)'};font-size:12px;font-weight:${scored?'700':'500'};cursor:pointer">${scored?'&#9989; ':''}${esc(shortName(p.fullName))}</button>`;
-            }).join('')}
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid var(--border)">
-          <div>
-            <div style="font-weight:700;font-size:13px">${esc(game?.opponent||I18n.t('games_lbl_opponent'))}</div>
-            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${I18n.t('gd_shootout_their_scorers')}</div>
-          </div>
-          <input type="number" min="0" max="20" value="${game?.penaltiesForThem||0}" style="width:64px;font-size:18px;font-weight:700;text-align:center;border:1px solid var(--border);border-radius:6px;padding:6px" onchange="simpleSetPenaltiesForThem(${gameId},this.value)">
-        </div>
-        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);text-align:center;font-size:13px;font-weight:700">
-          ${I18n.t('gd_shootout_score_line', {ours: penaltyScorerIds.length, theirs: game?.penaltiesForThem||0})}
-        </div>
-      </div>` : '';
-
     if (!squad.length && !tempSquad.length) {
       el.innerHTML = oppScoreField + `<div class="empty"><strong>${I18n.t('gd_xi_no_squad_title')}</strong><p>${I18n.t('gd_goals_no_squad_desc')}</p><button class="btn btn-primary" onclick="switchSimpleTab(${gameId},'squad')">${I18n.t('gd_btn_go_to_squad')}</button></div>`;
       return;
@@ -12046,7 +12018,6 @@ async function renderSimpleGoalsTab(gameId) {
 
     el.innerHTML = `
       ${oppScoreField}
-      ${shootoutPanel}
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('gd_goals_hint')}</p>
       <div class="goals-list">
         ${squad.map(p => {
@@ -12103,11 +12074,25 @@ async function simpleSetField(gameId, playerId, field, value) {
     gp[field] = parseInt(value) || 0;
     const key = await DB.put('gamePlayers', gp);
     gdDebugLog(`DB.put OK key=${key} ${field} now=${gp[field]}`);
+    if (field === 'penaltyGoals') await recalcOurPenaltyTotal(gameId);
     await refreshGameHeaderScore(gameId);
   } catch(err) {
     gdDebugLog(`ERROR: ${err.message}`);
     Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
   }
+}
+
+// Keeps game.ourPenaltyGoals (a small denormalized total) in sync with the
+// real per-player penaltyGoals values, so Calc.result() can compare it
+// against the opponent's penaltiesForThem without needing to fetch every
+// gamePlayers row itself — result() only ever receives the game object.
+async function recalcOurPenaltyTotal(gameId) {
+  const allGP = await DB.getAll('gamePlayers', 'gameId', gameId);
+  const total = allGP.reduce((s,r) => s + (parseInt(r.penaltyGoals)||0), 0);
+  const game = await DB.get('games', gameId);
+  if (!game) return;
+  game.ourPenaltyGoals = total;
+  await DB.put('games', game);
 }
 
 // Mirrors simpleSetField for temp players — same generic field-setter
@@ -12118,6 +12103,7 @@ async function simpleSetFieldTemp(gameId, tempPlayerId, field, value) {
     const gp = await getOrCreateGPForTemp(gameId, tempPlayerId);
     gp[field] = parseInt(value) || 0;
     await DB.put('gamePlayers', gp);
+    if (field === 'penaltyGoals') await recalcOurPenaltyTotal(gameId);
     await refreshGameHeaderScore(gameId);
   } catch(err) {
     Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
@@ -12168,18 +12154,88 @@ async function adjustOwnGoalsForUs(gameId, delta) {
 // isn't the same statistic as scoring during the match itself. Stored as
 // a simple list of which players scored (not how many each, since a
 // shootout is pass/fail per kicker) plus a single count for the opponent.
-async function togglePenaltyScorer(gameId, playerId) {
+// ── TAB — PENALTY SHOOTOUT (tournament games only) ───────────────────────────
+// Deliberately its own tab, shown only when game.tournamentId is set —
+// league games never see this, matching the explicit rule that a 90-minute
+// league match only ever needs goals/assists, nothing more.
+//
+// Each player who scored gets a real penaltyGoals count on their own
+// gamePlayers row (the same pattern as goals/assists), not just a
+// checkbox — this is what makes "Player A scored a penalty in this
+// tournament" an actual trackable stat, not something that only ever
+// lived inside this one game's view.
+async function renderPenaltiesTab(gameId) {
+  const el = document.getElementById('gdPanel-penalties');
+  if (!el) return;
   try {
     const game = await DB.get('games', gameId);
     if (!game) return;
-    if (!game.penaltyScorerIds) game.penaltyScorerIds = [];
-    const idx = game.penaltyScorerIds.indexOf(playerId);
-    if (idx >= 0) game.penaltyScorerIds.splice(idx, 1);
-    else game.penaltyScorerIds.push(playerId);
-    await DB.put('games', game);
-    await renderSimpleGoalsTab(gameId);
+    const allPlayers = window._gdPlayers || [];
+    const allTempPlayers = window._gdTempPlayers || [];
+    const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
+    const squad = allPlayers.filter(p => {
+      const gp = existingGP.find(r=>r.playerId===p.playerId);
+      return gp && gp.calledUp;
+    });
+    const tempSquad = allTempPlayers.filter(tp => {
+      const gp = existingGP.find(r=>r.tempPlayerId===tp.tempPlayerId);
+      return gp && gp.calledUp;
+    });
+
+    const ourPenaltyTotal = existingGP.reduce((s,r) => s + (parseInt(r.penaltyGoals)||0), 0);
+    const theirPenaltyTotal = parseInt(game.penaltiesForThem) || 0;
+    const shootoutWinner = ourPenaltyTotal === theirPenaltyTotal ? null : (ourPenaltyTotal > theirPenaltyTotal ? 'us' : 'them');
+
+    el.innerHTML = `
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('gd_shootout_hint')}</p>
+      <div class="goals-list">
+        ${squad.map(p => {
+          const gp = existingGP.find(r=>r.playerId===p.playerId) || {};
+          return `<div class="goal-row">
+            <div class="goal-info">
+              <span class="wp-num">${p.shirtNumber||'—'}</span>
+              <span class="wp-name" title="${esc(p.fullName)}">${esc(shortName(p.fullName))}</span>
+            </div>
+            <div class="wp-stats-row" style="padding:0">
+              <div class="wp-stat-field">
+                <label>${I18n.t('gd_shootout_lbl_scored')}</label>
+                <input type="number" min="0" max="10" value="${gp.penaltyGoals||0}" onchange="simpleSetField(${gameId},${p.playerId},'penaltyGoals',this.value)">
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+        ${tempSquad.map(tp => {
+          const gp = existingGP.find(r=>r.tempPlayerId===tp.tempPlayerId) || {};
+          return `<div class="goal-row">
+            <div class="goal-info">
+              <span class="wp-num">${tp.shirtNumber||'—'}</span>
+              <span class="wp-name" title="${esc(tp.name)}">${esc(tp.name)} <span class="pos-pill">${I18n.t('gd_guest_badge')}</span></span>
+            </div>
+            <div class="wp-stats-row" style="padding:0">
+              <div class="wp-stat-field">
+                <label>${I18n.t('gd_shootout_lbl_scored')}</label>
+                <input type="number" min="0" max="10" value="${gp.penaltyGoals||0}" onchange="simpleSetFieldTemp(${gameId},${tp.tempPlayerId},'penaltyGoals',this.value)">
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="card" style="margin-top:14px;padding:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div>
+            <div style="font-weight:700;font-size:13px">${esc(game.opponent||I18n.t('games_lbl_opponent'))}</div>
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${I18n.t('gd_shootout_their_scorers')}</div>
+          </div>
+          <input type="number" min="0" max="20" value="${game.penaltiesForThem||0}" style="width:64px;font-size:18px;font-weight:700;text-align:center;border:1px solid var(--border);border-radius:6px;padding:6px" onchange="simpleSetPenaltiesForThem(${gameId},this.value)">
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);text-align:center">
+          <div style="font-size:18px;font-weight:700">${ourPenaltyTotal} — ${theirPenaltyTotal}</div>
+          ${shootoutWinner ? `<div style="font-size:12px;color:${shootoutWinner==='us'?'#2a7a4e':'#b03030'};font-weight:700;margin-top:4px">${shootoutWinner==='us'?I18n.t('gd_shootout_we_won'):I18n.t('gd_shootout_we_lost')}</div>` : ''}
+        </div>
+      </div>
+    `;
   } catch(err) {
-    Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
+    el.innerHTML = `<div class="empty"><strong>Display error</strong><p style="color:#b03030;font-family:monospace;font-size:11px;white-space:pre-wrap">${esc(err.message)}</p></div>`;
   }
 }
 
@@ -12189,7 +12245,8 @@ async function simpleSetPenaltiesForThem(gameId, value) {
     if (!game) return;
     game.penaltiesForThem = parseInt(value) || 0;
     await DB.put('games', game);
-    await renderSimpleGoalsTab(gameId);
+    await refreshGameHeaderScore(gameId);
+    await renderPenaltiesTab(gameId);
   } catch(err) {
     Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
   }
