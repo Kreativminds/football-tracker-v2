@@ -639,6 +639,19 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
           <div class="form-group"><label data-i18n="games_lbl_tournament">Tournament (optional)</label>
             <select id="gf-tournament"><option value="">—</option></select>
           </div>
+          <div class="form-group"><label data-i18n="games_lbl_stage">Stage (optional)</label>
+            <select id="gf-stage">
+              <option value="">—</option>
+              <option value="Group Stage" data-i18n="stage_group">Group Stage</option>
+              <option value="Round of 16" data-i18n="stage_r16">Round of 16</option>
+              <option value="Quarter-Final" data-i18n="stage_qf">Quarter-Final</option>
+              <option value="Semi-Final" data-i18n="stage_sf">Semi-Final</option>
+              <option value="Final" data-i18n="stage_final">Final</option>
+              <option value="Gold Final" data-i18n="stage_gold_final">Gold Final</option>
+              <option value="Silver Final" data-i18n="stage_silver_final">Silver Final</option>
+              <option value="Bronze Final" data-i18n="stage_bronze_final">Bronze Final</option>
+            </select>
+          </div>
           <div class="form-group"><label data-i18n="games_lbl_ground">Venue / Ground</label>
             <input id="gf-ground" type="text" placeholder="e.g. Estádio Municipal">
             <div id="gf-ground-hint" style="display:none;font-size:11px;color:var(--muted);margin-top:4px"></div>
@@ -2038,6 +2051,14 @@ const TR = {
     common_save:'Save', common_cancel:'Cancel', common_no:'No', common_yes:'Yes',
     gd_tournament_guests:'Tournament Guests', gd_guest_badge:'Guest',
     games_lbl_tournament:'Tournament (optional)',
+    games_lbl_stage:'Stage (optional)',
+    stage_group:'Group Stage', stage_r16:'Round of 16', stage_qf:'Quarter-Final', stage_sf:'Semi-Final',
+    stage_final:'Final', stage_gold_final:'Gold Final', stage_silver_final:'Silver Final', stage_bronze_final:'Bronze Final',
+    tourn_outcome_label:'Tournament Outcome',
+    tourn_outcome_no_stages:'Add a Stage to your games to track how far you went.',
+    tourn_outcome_won:'Winner: {stage}',
+    tourn_outcome_reached:'Reached: {stage}',
+    tourn_outcome_stage:'Currently in: {stage}',
     tourn_new_title:'Create Tournament', tourn_edit_title:'Edit Tournament',
     tourn_name:'Tournament Name', tourn_location:'Location', tourn_category:'Category',
     tourn_start_date:'Start Date', tourn_end_date:'End Date', tourn_notes:'Notes',
@@ -2139,7 +2160,10 @@ const TR = {
     gd_goals_hint:'Enter goals and assists for anyone in the squad — Starter or Sub.',
     gd_goals_no_squad_desc:'Go to "Squad List" first.',
     gd_their_score:'Their Score',
-    gd_own_goal_hint:'If an own goal was scored against us, add it here — not on any of our players.', gd_own_goal_btn:'Own Goal', gd_own_goal_added:'Own goal added to their score.',
+    gd_own_goal_hint:'If the opponent scored an own goal (counts for us), add it here — not on any of our players.',
+    gd_shootout_title:'Penalty Shootout', gd_shootout_hint:'Tap each of our players who scored their penalty. This does not change the match score or player goal stats.',
+    gd_shootout_our_scorers:'Our Scorers', gd_shootout_their_scorers:'Their Penalties',
+    gd_shootout_score_line:'Shootout: {ours} — {theirs}',
     gd_lbl_goals:'Goals', gd_lbl_assists:'Assists',
     gd_added_to_squad:'Added to squad', gd_removed_from_squad:'Removed from squad',
     gd_could_not_save:'Could not save: {msg}',
@@ -2963,6 +2987,14 @@ const TR = {
     common_save:'Guardar', common_cancel:'Cancelar', common_no:'Não', common_yes:'Sim',
     gd_tournament_guests:'Convidados do Torneio', gd_guest_badge:'Convidado',
     games_lbl_tournament:'Torneio (opcional)',
+    games_lbl_stage:'Fase (opcional)',
+    stage_group:'Fase de Grupos', stage_r16:'Oitavos de Final', stage_qf:'Quartos de Final', stage_sf:'Meia-Final',
+    stage_final:'Final', stage_gold_final:'Final do Ouro', stage_silver_final:'Final da Prata', stage_bronze_final:'Final do Bronze',
+    tourn_outcome_label:'Resultado do Torneio',
+    tourn_outcome_no_stages:'Adicione uma Fase aos seus jogos para acompanhar até onde chegou.',
+    tourn_outcome_won:'Vencedor: {stage}',
+    tourn_outcome_reached:'Alcançou: {stage}',
+    tourn_outcome_stage:'Atualmente em: {stage}',
     tourn_new_title:'Criar Torneio', tourn_edit_title:'Editar Torneio',
     tourn_name:'Nome do Torneio', tourn_location:'Localização', tourn_category:'Categoria',
     tourn_start_date:'Data de Início', tourn_end_date:'Data de Fim', tourn_notes:'Notas',
@@ -3064,7 +3096,10 @@ const TR = {
     gd_goals_hint:'Introduza golos e assistências de qualquer jogador convocado — Titular ou Suplente.',
     gd_goals_no_squad_desc:'Vá primeiro a "Convocados".',
     gd_their_score:'Resultado Adversário',
-    gd_own_goal_hint:'Se foi marcado um autogolo contra nós, adicione aqui — não em nenhum dos nossos jogadores.', gd_own_goal_btn:'Autogolo', gd_own_goal_added:'Autogolo adicionado ao resultado do adversário.',
+    gd_own_goal_hint:'Se o adversário marcou um autogolo (conta a nosso favor), adicione aqui — não em nenhum dos nossos jogadores.',
+    gd_shootout_title:'Grande Penalidades', gd_shootout_hint:'Toque em cada jogador nosso que marcou o seu penálti. Isto não altera o resultado do jogo nem as estatísticas de golos dos jogadores.',
+    gd_shootout_our_scorers:'Os Nossos Marcadores', gd_shootout_their_scorers:'Penáltis Deles',
+    gd_shootout_score_line:'Grandes Penalidades: {ours} — {theirs}',
     gd_lbl_goals:'Golos', gd_lbl_assists:'Assistências',
     gd_added_to_squad:'Adicionado à convocatória', gd_removed_from_squad:'Removido da convocatória',
     gd_could_not_save:'Não foi possível guardar: {msg}',
@@ -4228,12 +4263,31 @@ const Backup = (() => {
 // ══════════════════════════════════════════════════════════════════════════════
 const Calc = (() => {
 
-  function teamGoals(gpRecords) {
-    return gpRecords.filter(r => r.calledUp).reduce((s,r) => s + (parseInt(r.goals)||0), 0);
+  // Second parameter is optional and backward compatible — every existing
+  // call site with just one argument behaves exactly as it always has.
+  // When a game record is passed, its ownGoalsForUs (own goals scored BY
+  // THE OPPONENT, counting toward our total) is added on top of the
+  // player-attributed sum, since an own goal is never credited to any
+  // specific player.
+  function teamGoals(gpRecords, game) {
+    const playerGoals = gpRecords.filter(r => r.calledUp).reduce((s,r) => s + (parseInt(r.goals)||0), 0);
+    const ownGoals = game ? (parseInt(game.ownGoalsForUs)||0) : 0;
+    return playerGoals + ownGoals;
   }
 
-  function result(ourGoals, theirGoals) {
+  // Third parameter is optional and backward compatible — every existing
+  // 2-argument call behaves exactly as before. When a game object is
+  // passed and the match is level, a recorded shootout (penaltyScorerIds
+  // vs penaltiesForThem) decides the result as a win or loss, matching
+  // real football convention — a shootout win is recorded as a W, not a D,
+  // even though the scoreline itself stays as the actual draw.
+  function result(ourGoals, theirGoals, game) {
     const o = parseInt(ourGoals)||0, t = parseInt(theirGoals)||0;
+    if (o === t && game && game.penaltyScorerIds && (game.penaltiesForThem !== undefined && game.penaltiesForThem !== null)) {
+      const ourPens = game.penaltyScorerIds.length;
+      const theirPens = parseInt(game.penaltiesForThem) || 0;
+      if (ourPens !== theirPens) return ourPens > theirPens ? 'W' : 'L';
+    }
     return o > t ? 'W' : o < t ? 'L' : 'D';
   }
 
@@ -5748,6 +5802,7 @@ async function openTournamentForm(tournamentId) {
   overlay.innerHTML = `
     <div class="rm-form" style="max-width:480px">
       <h2>${existing ? I18n.t('tourn_edit_title') : I18n.t('tourn_new_title')}</h2>
+      ${existing ? await renderTournamentOutcomeSummary(existing) : ''}
       <div class="form-grid">
         <div class="form-group full"><label>${I18n.t('tourn_name')} *</label><input id="tf-name" type="text" value="${esc(existing?.name||'')}"></div>
         <div class="form-group"><label>${I18n.t('tourn_location')}</label><input id="tf-location" type="text" value="${esc(existing?.location||'')}"></div>
@@ -5888,6 +5943,53 @@ async function saveTemporaryPlayerFromForm(tempPlayerId, tournamentId) {
 // with an Edit button — this was the actual missing piece: temp players
 // were being created but nothing ever displayed them afterward, so there
 // was no way to see, verify, or edit one once added.
+// ── TOURNAMENT OUTCOME SUMMARY ───────────────────────────────────────────────
+// Derives a plain-language summary of where the team ended up in a
+// tournament, from the stages and results already recorded on its games —
+// no new data beyond the Stage field added to each game. Built generally
+// so it works the same way for any tournament's bracket shape (a simple
+// single Final, or a Gold/Silver/Bronze split like IberCup), not just this
+// specific tournament's structure.
+async function renderTournamentOutcomeSummary(tournament) {
+  const games = await DB.getAll('games', 'seasonId', tournament.seasonId);
+  const tournGames = games.filter(g => g.tournamentId === tournament.tournamentId);
+  if (!tournGames.length) return '';
+
+  // Highest-stage game reached, in a sensible priority order — a Bronze
+  // Final only matters if no Gold/Silver Final was also played, etc.
+  const stagePriority = ['Gold Final','Final','Silver Final','Bronze Final','Semi-Final','Quarter-Final','Round of 16','Group Stage'];
+  const gamesWithStage = tournGames.filter(g => g.stage);
+  let furthestGame = null;
+  for (const stage of stagePriority) {
+    furthestGame = gamesWithStage.find(g => g.stage === stage);
+    if (furthestGame) break;
+  }
+
+  let outcomeText;
+  if (!furthestGame) {
+    outcomeText = I18n.t('tourn_outcome_no_stages');
+  } else {
+    const allGP = await DB.getAll('gamePlayers', 'gameId', furthestGame.gameId);
+    const ourScore = Calc.teamGoals(allGP, furthestGame);
+    const theirScore = parseInt(furthestGame.opponentScore) || 0;
+    const res = Calc.result(ourScore, theirScore, furthestGame);
+    const isFinal = furthestGame.stage.includes('Final');
+    if (isFinal && res === 'W') {
+      outcomeText = I18n.t('tourn_outcome_won', {stage: furthestGame.stage});
+    } else if (isFinal) {
+      outcomeText = I18n.t('tourn_outcome_reached', {stage: furthestGame.stage});
+    } else {
+      outcomeText = I18n.t('tourn_outcome_stage', {stage: furthestGame.stage});
+    }
+  }
+
+  return `
+    <div class="card" style="margin-bottom:14px;padding:12px;text-align:center;background:#faf7f0">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${I18n.t('tourn_outcome_label')}</div>
+      <div style="font-size:15px;font-weight:700">${esc(outcomeText)}</div>
+    </div>`;
+}
+
 async function renderTournamentTempPlayersList(tournament) {
   const linkedIds = tournament?.team?.temporaryPlayerIds || [];
   if (!linkedIds.length) return '<div id="tournTempPlayersList"></div>';
@@ -6885,7 +6987,7 @@ async function renderMatchLog(playerId) {
   const enriched = games.map(g => {
     const gp = lorGP.find(r => r.gameId === g.gameId);
     const gps = allGP.filter(r => r.gameId === g.gameId);
-    const our = Calc.teamGoals(gps);
+    const our = Calc.teamGoals(gps, g);
     const their = parseInt(g.opponentScore)||0;
     return { game: g, gp, _our: our, _their: their, _res: Calc.result(our,their) };
   });
@@ -7917,7 +8019,7 @@ async function renderPlayerPortalHome() {
       <div class="card-title">${I18n.t('home_card_last_games',{n:Math.min(3,played.length)})}</div>
       ${played.slice(0,3).map(g => {
         const gGP = allGP.filter(r => r.gameId === g.gameId);
-        const gOurs = Calc.teamGoals(gGP);
+        const gOurs = Calc.teamGoals(gGP, g);
         const gTheirs = parseInt(g.opponentScore)||0;
         const gRes = Calc.result(gOurs, gTheirs);
         const gVisible = isGameResultVisible(g);
@@ -8002,7 +8104,7 @@ async function renderPlayerPortalStats() {
         ${last5.map(g => {
           const gp = playerGP.find(r => r.gameId === g.gameId);
           const gps = allGP.filter(r => r.gameId === g.gameId);
-          const our = Calc.teamGoals(gps);
+          const our = Calc.teamGoals(gps, g);
           const their = parseInt(g.opponentScore)||0;
           const res = Calc.result(our, their);
           const visible = isGameResultVisible(g);
@@ -8064,7 +8166,7 @@ async function renderPlayerPortalGames() {
     <div class="who-played-list">
       ${games.map(g => {
         const gGP = allGP.filter(r => r.gameId === g.gameId);
-        const gOurs = Calc.teamGoals(gGP);
+        const gOurs = Calc.teamGoals(gGP, g);
         const gTheirs = parseInt(g.opponentScore)||0;
         const gRes = Calc.result(gOurs, gTheirs);
         const gVisible = isGameResultVisible(g);
@@ -8099,9 +8201,9 @@ async function openPortalGameViewer(gameId) {
   // to correctly check both sources.
   const playerName = (gpRow) => resolvePlayerName(gpRow, players, tempPlayers);
 
-  const ourScore = Calc.teamGoals(gp);
+  const ourScore = Calc.teamGoals(gp, game);
   const theirScore = parseInt(game.opponentScore) || 0;
-  const res = Calc.result(ourScore, theirScore);
+  const res = Calc.result(ourScore, theirScore, game);
   const visible = isGameResultVisible(game);
   const scoreDisplay = Calc.homeAwayScore(game.homeAway, ourScore, theirScore);
 
@@ -8714,7 +8816,7 @@ const Render = (() => {
         <div class="card-title">${played.length>1?I18n.t('home_card_last_games',{n:Math.min(3,played.length)}):I18n.t('home_card_last_game')}</div>
         ${played.slice(0,3).map(g => {
           const gGP = allGP.filter(r => r.gameId === g.gameId);
-          const gOurs = Calc.teamGoals(gGP);
+          const gOurs = Calc.teamGoals(gGP, g);
           const gTheirs = parseInt(g.opponentScore)||0;
           const gRes = Calc.result(gOurs, gTheirs);
           const gVisible = isGameResultVisible(g);
@@ -8816,7 +8918,7 @@ const Render = (() => {
         const formStrip = tpGames.map(g=>{
           const gp = allGP.find(r=>r.gameId===g.gameId && r.playerId===tp.playerId);
           const gps = allGP.filter(r=>r.gameId===g.gameId);
-          const res = Calc.result(Calc.teamGoals(gps), g.opponentScore||0);
+          const res = Calc.result(Calc.teamGoals(gps, g), g.opponentScore||0);
           if (!gp||!gp.calledUp) return `<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:2px;font-size:10px;font-weight:700;background:#f0f0f0;color:#999">—</span>`;
           if (!isGameResultVisible(g)) return `<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:2px;font-size:10px;font-weight:700;background:#f0f0f0;color:#999" title="In progress">···</span>`;
           const col = res==='W'?'#e6f4ea':res==='D'?'#fff8e1':'#fde8e8';
@@ -8981,7 +9083,7 @@ const Render = (() => {
     // Pre-compute score/result for sorting
     const enriched = games.map(g => {
       const gps = allGP.filter(r=>r.gameId===g.gameId);
-      const our = Calc.teamGoals(gps);
+      const our = Calc.teamGoals(gps, g);
       const their = parseInt(g.opponentScore)||0;
       return { ...g, _our: our, _their: their, _res: Calc.result(our, their) };
     });
@@ -9085,9 +9187,9 @@ const Render = (() => {
     window._gdPlayers = activePlayers;
     window._gdGameId = gameId;
 
-    const ourScore = Calc.teamGoals(existingGP);
+    const ourScore = Calc.teamGoals(existingGP, game);
     const theirScore = parseInt(game.opponentScore)||0;
-    const res = Calc.result(ourScore, theirScore);
+    const res = Calc.result(ourScore, theirScore, game);
     const displayScore = Calc.homeAwayScore(game.homeAway, ourScore, theirScore);
     const currentTab = State.gameDetailTab || 'squad';
     const matchedOpponent = await findOpponentByName(game.opponent);
@@ -9168,7 +9270,7 @@ const Render = (() => {
     const ovEnriched = games.map(g => {
       const gp = allGP.find(r=>r.gameId===g.gameId && r.playerId===playerId);
       const gps = allGP.filter(r=>r.gameId===g.gameId);
-      const our = Calc.teamGoals(gps);
+      const our = Calc.teamGoals(gps, g);
       const their = parseInt(g.opponentScore)||0;
       return { game:g, gp, _our:our, _their:their, _res:Calc.result(our,their) };
     });
@@ -9250,7 +9352,7 @@ const Render = (() => {
           ${last5.map(g=>{
             const gp = lorGP.find(r=>r.gameId===g.gameId);
             const gps = allGP.filter(r=>r.gameId===g.gameId);
-            const our = Calc.teamGoals(gps);
+            const our = Calc.teamGoals(gps, g);
             const their = parseInt(g.opponentScore)||0;
             const res = Calc.result(our,their);
             const visible = isGameResultVisible(g);
@@ -11334,6 +11436,7 @@ function resetGameForm() {
   });
   document.getElementById('gf-venue').value='Home';
   document.getElementById('gf-compType').value='League';
+  document.getElementById('gf-stage').value='';
   autoFillHomeGround();
   populateTournamentDropdown();
 }
@@ -11400,6 +11503,7 @@ async function saveGame() {
     competitionType: document.getElementById('gf-compType').value,
     competitionName: document.getElementById('gf-compName').value.trim()||null,
     tournamentId: document.getElementById('gf-tournament')?.value ? parseInt(document.getElementById('gf-tournament').value) : null,
+    stage: document.getElementById('gf-stage')?.value || null,
     venue: document.getElementById('gf-ground').value.trim()||null,
     teamNotes: document.getElementById('gf-notes').value.trim()||null,
     createdAt: new Date().toISOString(),
@@ -11432,6 +11536,7 @@ async function editGame(id) {
   document.getElementById('gf-compType').value = g.competitionType||'League';
   document.getElementById('gf-compName').value = g.competitionName||'';
   populateTournamentDropdown(g.tournamentId);
+  document.getElementById('gf-stage').value = g.stage || '';
   document.getElementById('gf-ground').value = g.venue||'';
   document.getElementById('gf-notes').value = g.teamNotes||'';
   document.getElementById('gf-id').value = id;
@@ -11893,9 +11998,46 @@ async function renderSimpleGoalsTab(gameId) {
         </div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
           <div style="font-size:11px;color:var(--muted)">${I18n.t('gd_own_goal_hint')}</div>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="addOwnGoalAgainstUs(${gameId})">+1 ${I18n.t('gd_own_goal_btn')}</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button type="button" onclick="adjustOwnGoalsForUs(${gameId},-1)" ${!(game?.ownGoalsForUs>0)?'disabled':''} style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:16px;font-weight:700;cursor:pointer;${!(game?.ownGoalsForUs>0)?'opacity:.35':''}">&minus;</button>
+            <span style="font-size:13px;min-width:20px;text-align:center">${game?.ownGoalsForUs||0}</span>
+            <button type="button" onclick="adjustOwnGoalsForUs(${gameId},1)" style="width:32px;height:32px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:16px;font-weight:700;cursor:pointer">+</button>
+          </div>
         </div>
       </div>`;
+
+    // Penalty shootout only applies when the match is genuinely level —
+    // it has no meaning otherwise, and showing it unconditionally would be
+    // confusing clutter on every normal game.
+    const ourCurrentScore = Calc.teamGoals(existingGP, game);
+    const theirCurrentScore = parseInt(game?.opponentScore) || 0;
+    const isLevel = ourCurrentScore === theirCurrentScore;
+    const penaltyScorerIds = game?.penaltyScorerIds || [];
+
+    const shootoutPanel = isLevel ? `
+      <div class="card" style="margin-bottom:14px;padding:14px">
+        <div class="card-title" style="margin-bottom:8px">${I18n.t('gd_shootout_title')}</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">${I18n.t('gd_shootout_hint')}</p>
+        <div style="margin-bottom:12px">
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:6px">${I18n.t('gd_shootout_our_scorers')}</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${squad.map(p => {
+              const scored = penaltyScorerIds.includes(p.playerId);
+              return `<button type="button" onclick="togglePenaltyScorer(${gameId},${p.playerId})" style="padding:6px 10px;border-radius:6px;border:2px solid ${scored?'#2a7a4e':'var(--border)'};background:${scored?'#e6f4ea':'#fff'};color:${scored?'#2a7a4e':'var(--dark)'};font-size:12px;font-weight:${scored?'700':'500'};cursor:pointer">${scored?'&#9989; ':''}${esc(shortName(p.fullName))}</button>`;
+            }).join('')}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid var(--border)">
+          <div>
+            <div style="font-weight:700;font-size:13px">${esc(game?.opponent||I18n.t('games_lbl_opponent'))}</div>
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${I18n.t('gd_shootout_their_scorers')}</div>
+          </div>
+          <input type="number" min="0" max="20" value="${game?.penaltiesForThem||0}" style="width:64px;font-size:18px;font-weight:700;text-align:center;border:1px solid var(--border);border-radius:6px;padding:6px" onchange="simpleSetPenaltiesForThem(${gameId},this.value)">
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);text-align:center;font-size:13px;font-weight:700">
+          ${I18n.t('gd_shootout_score_line', {ours: penaltyScorerIds.length, theirs: game?.penaltiesForThem||0})}
+        </div>
+      </div>` : '';
 
     if (!squad.length && !tempSquad.length) {
       el.innerHTML = oppScoreField + `<div class="empty"><strong>${I18n.t('gd_xi_no_squad_title')}</strong><p>${I18n.t('gd_goals_no_squad_desc')}</p><button class="btn btn-primary" onclick="switchSimpleTab(${gameId},'squad')">${I18n.t('gd_btn_go_to_squad')}</button></div>`;
@@ -11904,6 +12046,7 @@ async function renderSimpleGoalsTab(gameId) {
 
     el.innerHTML = `
       ${oppScoreField}
+      ${shootoutPanel}
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('gd_goals_hint')}</p>
       <div class="goals-list">
         ${squad.map(p => {
@@ -11996,20 +12139,56 @@ async function simpleSetOpponentScore(gameId, value) {
   }
 }
 
-// An own goal (one of our players accidentally scoring on their own net,
-// counting toward the OPPONENT's total) has no correct home anywhere in
-// the per-player goals list — attributing it to any of our players there
-// would incorrectly inflate his personal goal tally and season stats.
-// This adds directly to the opponent's score instead, exactly like a
-// manual score edit, without ever touching any player's own numbers.
-async function addOwnGoalAgainstUs(gameId) {
+// An own goal scored BY THE OPPONENT counts FOR our team — the ball went
+// into their own net. It has no correct home in the per-player goals list
+// (crediting any of our players would be factually wrong, since none of
+// them scored it), so it's tracked as its own field on the game record,
+// separate from ownGoalsForUs contributing to OUR total, and never
+// touching any individual player's stats. A true +/- counter (not a
+// one-way button) so a mistaken tap can always be corrected.
+async function adjustOwnGoalsForUs(gameId, delta) {
   try {
     const game = await DB.get('games', gameId);
     if (!game) return;
-    game.opponentScore = (parseInt(game.opponentScore)||0) + 1;
+    const current = parseInt(game.ownGoalsForUs) || 0;
+    game.ownGoalsForUs = Math.max(0, current + delta);
     await DB.put('games', game);
-    Toast.show(I18n.t('gd_own_goal_added'));
     await refreshGameHeaderScore(gameId);
+    await renderSimpleGoalsTab(gameId);
+  } catch(err) {
+    Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
+  }
+}
+
+// ── PENALTY SHOOTOUT ─────────────────────────────────────────────────────────
+// A shootout only ever happens after a drawn match, and is deliberately
+// tracked separately from normal play: it never adds to the match score
+// (the scoreline stays as the actual draw), and never touches any
+// player's goals/assists stats, since scoring a penalty in a shootout
+// isn't the same statistic as scoring during the match itself. Stored as
+// a simple list of which players scored (not how many each, since a
+// shootout is pass/fail per kicker) plus a single count for the opponent.
+async function togglePenaltyScorer(gameId, playerId) {
+  try {
+    const game = await DB.get('games', gameId);
+    if (!game) return;
+    if (!game.penaltyScorerIds) game.penaltyScorerIds = [];
+    const idx = game.penaltyScorerIds.indexOf(playerId);
+    if (idx >= 0) game.penaltyScorerIds.splice(idx, 1);
+    else game.penaltyScorerIds.push(playerId);
+    await DB.put('games', game);
+    await renderSimpleGoalsTab(gameId);
+  } catch(err) {
+    Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
+  }
+}
+
+async function simpleSetPenaltiesForThem(gameId, value) {
+  try {
+    const game = await DB.get('games', gameId);
+    if (!game) return;
+    game.penaltiesForThem = parseInt(value) || 0;
+    await DB.put('games', game);
     await renderSimpleGoalsTab(gameId);
   } catch(err) {
     Toast.error(I18n.t('gd_could_not_save', {msg: err.message}));
@@ -12020,9 +12199,9 @@ async function refreshGameHeaderScore(gameId) {
   const existingGP = await DB.getAll('gamePlayers','gameId',gameId);
   const game = await DB.get('games', gameId);
   if (!game) return;
-  const ourScore = Calc.teamGoals(existingGP);
+  const ourScore = Calc.teamGoals(existingGP, game);
   const theirScore = parseInt(game.opponentScore)||0;
-  const res = Calc.result(ourScore, theirScore);
+  const res = Calc.result(ourScore, theirScore, game);
   const s = Calc.homeAwayScore(game.homeAway, ourScore, theirScore);
   const scoreEl = document.getElementById('liveScore');
   const resultEl = document.getElementById('liveResult');
