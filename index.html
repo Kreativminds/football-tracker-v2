@@ -632,6 +632,18 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
               <option value="Away" data-i18n="venue_away">Away</option>
             </select>
           </div>
+          <div class="form-group"><label data-i18n="games_lbl_duration">Match Duration (optional — uses season default)</label>
+            <select id="gf-duration-select" onchange="toggleGameDurationCustom()">
+              <option value="">${I18n.t('duration_use_season_default')}</option>
+              <option value="50">50 min</option>
+              <option value="60">60 min</option>
+              <option value="70">70 min</option>
+              <option value="80">80 min</option>
+              <option value="90">90 min</option>
+              <option value="custom">${I18n.t('duration_custom')}</option>
+            </select>
+            <input id="gf-duration-custom" type="number" min="10" max="150" placeholder="e.g. 65" style="display:none;margin-top:6px">
+          </div>
           <div class="form-group">
             <label><span data-i18n="games_lbl_arrival">Arrival Time</span> <span style="font-size:10px;font-weight:400;color:#999" data-i18n="games_arrival_hint">(optional — defaults to 1h before kick-off)</span></label>
             <div style="display:flex;gap:6px;align-items:center">
@@ -948,6 +960,37 @@ function isGameResultVisible(game) {
   }
   const cutoff = new Date(gameDateTime.getTime() + (CONFIG.MATCH_DURATION_MINS + CONFIG.RESULT_VISIBILITY_BUFFER_MINS) * 60000);
   return now >= cutoff;
+}
+
+// Resolves the real match length for a specific game: the game's own
+// override if set, else the season's default if set, else the standard
+// 90 minutes. Deliberately per-game, not tied to competition type — a
+// friendly, a cup game, a tournament match, or a league game can each set
+// their own duration or override, since no single rule can predict every
+// league/format/association's actual standard.
+function resolveMatchDuration(game, season) {
+  if (game?.matchDurationMins) return game.matchDurationMins;
+  if (season?.defaultMatchDurationMins) return season.defaultMatchDurationMins;
+  return CONFIG.MATCH_DURATION_MINS;
+}
+
+// Whether the game's data (squad, lineup, goals, penalties) is currently
+// editable WITHOUT tapping the explicit Edit override button. Editable
+// from kickoff (or shortly before) through kickoff + the resolved match
+// duration; outside that window it's read-only by default. This is a
+// distinct concept from isGameResultVisible above — that one is about
+// when a result is safe to SHOW on Home/Match Log; this one is about
+// when data entry is expected to still be happening live.
+function isGameEditable(game, season) {
+  if (!game || !game.date) return true; // nothing to lock yet
+  const now = new Date();
+  const gameDateTime = new Date(`${game.date}T${game.gameTime || '00:00'}`);
+  if (isNaN(gameDateTime)) return true;
+  const PRE_KICKOFF_GRACE_MINS = 30; // editable slightly before kickoff too, for pre-match squad selection
+  const preKickoff = new Date(gameDateTime.getTime() - PRE_KICKOFF_GRACE_MINS * 60000);
+  const durationMins = resolveMatchDuration(game, season);
+  const windowEnd = new Date(gameDateTime.getTime() + durationMins * 60000);
+  return now >= preKickoff && now <= windowEnd;
 }
 
 // ── NEXT GAME(S) CAROUSEL — shared by guardian and player Home pages ────────
@@ -2141,6 +2184,10 @@ const TR = {
     games_lbl_opponent:'Opponent *',
     games_lbl_homeaway:'Home / Away',
     games_lbl_neutral_side:'Neutral — treat us as',
+    games_lbl_duration:'Match Duration (optional — uses season default)',
+    set_lbl_match_duration:'Default Match Duration',
+    duration_default_90:'Standard (90 min)', duration_use_season_default:'Use season default',
+    duration_custom:'Custom...',
     venue_home:'Home', venue_away:'Away', venue_neutral:'Neutral',
     games_lbl_arrival:'Arrival Time',
     games_arrival_hint:'(optional — defaults to 1h before kick-off)',
@@ -3080,6 +3127,10 @@ const TR = {
     games_lbl_opponent:'Adversário *',
     games_lbl_homeaway:'Casa / Fora',
     games_lbl_neutral_side:'Neutro — tratar-nos como',
+    games_lbl_duration:'Duração do Jogo (opcional — usa o padrão da época)',
+    set_lbl_match_duration:'Duração Padrão do Jogo',
+    duration_default_90:'Padrão (90 min)', duration_use_season_default:'Usar padrão da época',
+    duration_custom:'Personalizado...',
     venue_home:'Casa', venue_away:'Fora', venue_neutral:'Neutro',
     games_lbl_arrival:'Hora de Chegada',
     games_arrival_hint:'(opcional — por defeito 1h antes do jogo)',
@@ -9740,6 +9791,18 @@ const Render = (() => {
             <div class="form-group"><label>${I18n.t('set_lbl_club_name')}</label><input id="sf-club" type="text" placeholder="e.g. SL Olivais"></div>
             <div class="form-group"><label>${I18n.t('set_lbl_home_ground')}</label><input id="sf-homeground" type="text" placeholder="e.g. Campo SL Olivais"></div>
             <div class="form-group"><label>${I18n.t('set_lbl_age_group')}</label><input id="sf-age" type="text" placeholder="e.g. U12"></div>
+            <div class="form-group"><label>${I18n.t('set_lbl_match_duration')}</label>
+              <select id="sf-duration-select" onchange="toggleSeasonDurationCustom()">
+                <option value="">${I18n.t('duration_default_90')}</option>
+                <option value="50">50 min</option>
+                <option value="60">60 min</option>
+                <option value="70">70 min</option>
+                <option value="80">80 min</option>
+                <option value="90">90 min</option>
+                <option value="custom">${I18n.t('duration_custom')}</option>
+              </select>
+              <input id="sf-duration-custom" type="number" min="10" max="150" placeholder="e.g. 65" style="display:none;margin-top:6px">
+            </div>
             <div class="form-group"><label>${I18n.t('set_lbl_shirt_color')} <span style="font-size:10px;font-weight:400;color:#999">${I18n.t('set_shirt_color_hint')}</span></label>
               <div style="display:flex;gap:6px;align-items:center">
                 <input id="sf-shirtcolor" type="color" value="#B23333" style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:4px">
@@ -11488,6 +11551,7 @@ function resetGameForm() {
   document.getElementById('gf-venue').value='Home';
   document.getElementById('gf-neutral-side').value='Home';
   toggleNeutralSideField();
+  populateDurationField('gf-duration-select', 'gf-duration-custom', null);
   document.getElementById('gf-compType').value='League';
   document.getElementById('gf-stage').value='';
   autoFillHomeGround();
@@ -11513,6 +11577,63 @@ function toggleNeutralSideField() {
   const venue = document.getElementById('gf-venue')?.value;
   const group = document.getElementById('gf-neutral-side-group');
   if (group) group.style.display = venue === 'Neutral' ? '' : 'none';
+}
+
+// Shows the free-text minutes input only when "Custom" is chosen in the
+// duration dropdown — used identically for the season default and the
+// per-game override, since neither has one universally correct answer
+// (confirmed varies by format — 7-a-side, 9-a-side, 11-a-side — and even
+// by district association, not something a single lookup table can get
+// right for every league).
+function toggleSeasonDurationCustom() {
+  const sel = document.getElementById('sf-duration-select');
+  const custom = document.getElementById('sf-duration-custom');
+  if (!sel || !custom) return;
+  custom.style.display = sel.value === 'custom' ? '' : 'none';
+}
+
+function toggleGameDurationCustom() {
+  const sel = document.getElementById('gf-duration-select');
+  const custom = document.getElementById('gf-duration-custom');
+  if (!sel || !custom) return;
+  custom.style.display = sel.value === 'custom' ? '' : 'none';
+}
+
+// Reads a duration select+custom pair and returns the actual minute value,
+// or null if left as the default (meaning "use the season default" for a
+// game, or "use the system default of 90" for a season).
+function readDurationFromForm(selectId, customId) {
+  const sel = document.getElementById(selectId)?.value;
+  if (!sel) return null;
+  if (sel === 'custom') {
+    const v = parseInt(document.getElementById(customId)?.value);
+    return (v && v > 0) ? v : null;
+  }
+  return parseInt(sel) || null;
+}
+
+// Populates a duration select+custom pair from a stored minute value —
+// selects the matching standard option if one matches exactly, otherwise
+// falls back to Custom with the real value shown in the free-text field.
+function populateDurationField(selectId, customId, minutes) {
+  const sel = document.getElementById(selectId);
+  const custom = document.getElementById(customId);
+  if (!sel || !custom) return;
+  if (!minutes) {
+    sel.value = '';
+    custom.style.display = 'none';
+    return;
+  }
+  const standardValues = ['50','60','70','80','90'];
+  const asStr = String(minutes);
+  if (standardValues.includes(asStr)) {
+    sel.value = asStr;
+    custom.style.display = 'none';
+  } else {
+    sel.value = 'custom';
+    custom.value = minutes;
+    custom.style.display = '';
+  }
 }
 
 function autoFillHomeGround() {
@@ -11563,6 +11684,7 @@ async function saveGame() {
     opponent: opp,
     homeAway: document.getElementById('gf-venue').value,
     neutralSide: document.getElementById('gf-venue').value === 'Neutral' ? (document.getElementById('gf-neutral-side')?.value || 'Home') : null,
+    matchDurationMins: readDurationFromForm('gf-duration-select', 'gf-duration-custom'),
     competitionType: document.getElementById('gf-compType').value,
     competitionName: document.getElementById('gf-compName').value.trim()||null,
     tournamentId: document.getElementById('gf-tournament')?.value ? parseInt(document.getElementById('gf-tournament').value) : null,
@@ -11598,6 +11720,7 @@ async function editGame(id) {
   document.getElementById('gf-venue').value = g.homeAway||'Home';
   document.getElementById('gf-neutral-side').value = g.neutralSide || 'Home';
   toggleNeutralSideField();
+  populateDurationField('gf-duration-select', 'gf-duration-custom', g.matchDurationMins);
   document.getElementById('gf-compType').value = g.competitionType||'League';
   document.getElementById('gf-compName').value = g.competitionName||'';
   populateTournamentDropdown(g.tournamentId);
@@ -12531,6 +12654,7 @@ document.addEventListener('click', async e => {
       clubName: document.getElementById('sf-club')?.value.trim()||null,
       homeGround: document.getElementById('sf-homeground')?.value.trim()||null,
       ageGroup: document.getElementById('sf-age')?.value.trim()||null,
+      defaultMatchDurationMins: readDurationFromForm('sf-duration-select', 'sf-duration-custom'),
       shirtColor: (shirtColorInput && shirtColorInput.value !== '#b23333' && shirtColorInput.value !== '#B23333') ? shirtColorInput.value : null,
       notes: document.getElementById('sf-notes')?.value.trim()||null,
       createdAt: new Date().toISOString(),
