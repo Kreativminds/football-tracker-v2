@@ -4392,9 +4392,9 @@ const Calc = (() => {
 
     sorted.forEach(g => {
       const gps = allGP.filter(r => r.gameId === g.gameId);
-      const our = teamGoals(gps);
+      const our = teamGoals(gps, g);
       const their = parseInt(g.opponentScore)||0;
-      const res = result(our, their);
+      const res = result(our, their, g);
       const gd = our - their;
 
       s.played++;
@@ -8035,15 +8035,16 @@ async function renderPlayerPortalHome() {
         const gGP = allGP.filter(r => r.gameId === g.gameId);
         const gOurs = Calc.teamGoals(gGP, g);
         const gTheirs = parseInt(g.opponentScore)||0;
-        const gRes = Calc.result(gOurs, gTheirs);
+        const gRes = Calc.result(gOurs, gTheirs, g);
         const gVisible = isGameResultVisible(g);
+        const gHasPens = g.ourPenaltyGoals!==undefined && g.ourPenaltyGoals!==null && g.penaltiesForThem!==undefined && g.penaltiesForThem!==null;
         return `<div onclick="openPortalGameViewer(${g.gameId})" style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer">
           <div>
             <div style="font-weight:700;font-size:13px">${esc(g.opponent)} <span style="font-weight:400;color:var(--muted);font-size:11px">${homeAwayLabel(g.homeAway)}</span></div>
             <div style="font-size:10px;color:var(--muted);margin-top:1px">${fmtDate(g.date)}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
-            ${gVisible ? `<span class="badge badge-${gRes}">${gRes}</span> <span style="font-size:15px;font-weight:700;margin-left:6px">${(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})()}</span>` : `<span class="td-muted" style="font-size:11px">${I18n.t('home_in_progress')}</span>`}
+            ${gVisible ? `<span class="badge badge-${gRes}">${gRes}</span> <span style="font-size:15px;font-weight:700;margin-left:6px">${(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})()}</span>${gHasPens?` <span style="font-size:10px;color:var(--muted);font-weight:700">${g.ourPenaltyGoals}-${g.penaltiesForThem} P</span>`:''}` : `<span class="td-muted" style="font-size:11px">${I18n.t('home_in_progress')}</span>`}
           </div>
         </div>`;
       }).join('')}
@@ -8182,7 +8183,7 @@ async function renderPlayerPortalGames() {
         const gGP = allGP.filter(r => r.gameId === g.gameId);
         const gOurs = Calc.teamGoals(gGP, g);
         const gTheirs = parseInt(g.opponentScore)||0;
-        const gRes = Calc.result(gOurs, gTheirs);
+        const gRes = Calc.result(gOurs, gTheirs, g);
         const gVisible = isGameResultVisible(g);
         return `<div class="wp-row" onclick="openPortalGameViewer(${g.gameId})" style="cursor:pointer">
           <div class="wp-info">
@@ -8832,8 +8833,9 @@ const Render = (() => {
           const gGP = allGP.filter(r => r.gameId === g.gameId);
           const gOurs = Calc.teamGoals(gGP, g);
           const gTheirs = parseInt(g.opponentScore)||0;
-          const gRes = Calc.result(gOurs, gTheirs);
+          const gRes = Calc.result(gOurs, gTheirs, g);
           const gVisible = isGameResultVisible(g);
+          const gHasPens = g.ourPenaltyGoals!==undefined && g.ourPenaltyGoals!==null && g.penaltiesForThem!==undefined && g.penaltiesForThem!==null;
           return `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="goToGameDetail(${g.gameId})">
             <div>
@@ -8844,6 +8846,7 @@ const Render = (() => {
               ${gVisible ? `
               <span class="badge badge-${gRes}">${gRes}</span>
               <span style="font-size:15px;font-weight:700;margin-left:6px">${(()=>{const s=Calc.homeAwayScore(g.homeAway,gOurs,gTheirs);return s.home+'–'+s.away;})()}</span>
+              ${gHasPens?`<span style="font-size:10px;color:var(--muted);font-weight:700;margin-left:4px">${g.ourPenaltyGoals}-${g.penaltiesForThem} P</span>`:''}
               ` : `<span class="td-muted" style="font-size:11px">${I18n.t('home_in_progress')}</span>`}
             </div>
           </div>`;
@@ -8932,7 +8935,7 @@ const Render = (() => {
         const formStrip = tpGames.map(g=>{
           const gp = allGP.find(r=>r.gameId===g.gameId && r.playerId===tp.playerId);
           const gps = allGP.filter(r=>r.gameId===g.gameId);
-          const res = Calc.result(Calc.teamGoals(gps, g), g.opponentScore||0);
+          const res = Calc.result(Calc.teamGoals(gps, g), g.opponentScore||0, g);
           if (!gp||!gp.calledUp) return `<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:2px;font-size:10px;font-weight:700;background:#f0f0f0;color:#999">—</span>`;
           if (!isGameResultVisible(g)) return `<span style="display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:2px;font-size:10px;font-weight:700;background:#f0f0f0;color:#999" title="In progress">···</span>`;
           const col = res==='W'?'#e6f4ea':res==='D'?'#fff8e1':'#fde8e8';
