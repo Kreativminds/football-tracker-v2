@@ -6106,6 +6106,7 @@ async function renderTournamentGamesTab() {
   allOpponents.forEach(o => { if (o.logoUrl) opponentLogoByName[(o.opponentName||'').toLowerCase()] = o.logoUrl; });
 
   const tournamentCardsHtml = !tournaments.length ? `<div class="empty"><strong>${I18n.t('tourn_empty')}</strong></div>` : (await Promise.all(tournaments.map(async t => {
+      await syncTournamentAchievements(t.tournamentId);
       const tGames = allGames.filter(g => g.tournamentId === t.tournamentId);
       const outcome = await getTournamentOutcome(t);
       return `
@@ -6503,6 +6504,13 @@ async function renderTournamentSummaryPage(tournamentIdRaw) {
   const tournamentId = parseInt(tournamentIdRaw);
   const tournament = await getTournamentById(tournamentId);
   if (!tournament) { el.innerHTML = `<div class="empty"><strong>${I18n.t('tourn_empty')}</strong></div>`; return; }
+
+  // Catches up any tournament whose achievements were never generated —
+  // e.g. one finished before this feature existed, or edited outside the
+  // normal save paths. Safe to run every time this page loads: the
+  // fingerprint check inside means an already-correct achievement is
+  // left untouched, never duplicated.
+  await syncTournamentAchievements(tournamentId);
 
   const [allGames, players, allGP, allTempPlayers] = await Promise.all([
     DB.getAll('games','seasonId',State.currentSeasonId),
