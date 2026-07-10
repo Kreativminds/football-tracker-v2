@@ -4354,7 +4354,7 @@ const DB = (() => {
     return _db && _db.objectStoreNames.contains(store);
   }
 
-  return { open, get, getAll, put, del, clear, getAllFromAllStores, restoreAllStores, hasStore };
+  return { open, get, getAll, put, del, softDelete, clear, getAllFromAllStores, restoreAllStores, hasStore };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════
