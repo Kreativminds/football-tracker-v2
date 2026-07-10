@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Team Season</title>
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{
+    --black:#B23333;
+    --dark:#333333;
+    --muted:#999999;
+    --border:#dddddd;
+    --bg:#F2F4F7;
+    --surface:#ffffff;
+    --radius:3px;
+    --green:#2a7a4e;
+    --green-bg:#e6f4ea;
+    --amber:#8a6d1e;
+    --amber-bg:#fbf3d9;
+    --red:#b03030;
+    --red-bg:#fbe9e9;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;width:100%;font-family:'Montserrat',Arial,sans-serif;font-size:14px;background:var(--bg);color:var(--dark);margin:0;overscroll-behavior-x:none}
+  .wrap{max-width:520px;margin:0 auto;padding:16px 16px 40px}
+  .brand{display:flex;align-items:center;gap:10px;padding:18px 0 14px}
+  .brand-mark{width:38px;height:38px;border:2px solid var(--black);border-radius:8px;display:flex;align-items:center;justify-content:center;font-weight:800;font-style:italic;color:var(--black);font-size:15px;flex-shrink:0}
+  .brand-name{font-weight:800;font-size:19px}
+  .brand-name b{color:var(--black)}
+  .team-header{margin-bottom:16px}
+  .team-header h1{font-size:22px;margin:0 0 2px;font-weight:800}
+  .team-header .sub{font-size:13px;color:var(--muted)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:12px}
+  .card-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .stat-grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+  .stat-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+  .stat-value{font-size:20px;font-weight:800;margin-top:2px}
+  .row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:none}
+  .row-name{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .row-meta{font-size:11px;color:var(--muted);flex-shrink:0}
+  .pill{background:#eee;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:700;flex-shrink:0}
+  .badge{border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;flex-shrink:0}
+  .badge-W{background:var(--green-bg);color:var(--green)}
+  .badge-D{background:var(--amber-bg);color:var(--amber)}
+  .badge-L{background:var(--red-bg);color:var(--red)}
+  .score{font-size:13px;font-weight:700;flex-shrink:0}
+  .outcome-banner{text-align:center;padding:18px 16px}
+  .outcome-banner .name{font-weight:700;font-size:14px}
+  .outcome-banner .label{font-size:19px;font-weight:800;margin-top:4px}
+  .squad-num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#eee;font-size:11px;font-weight:700;flex-shrink:0}
+  .empty{text-align:center;padding:40px 16px;color:var(--muted)}
+  .empty .icon{font-size:32px;margin-bottom:10px}
+  .loading{text-align:center;padding:60px 16px;color:var(--muted)}
+  .footer-note{text-align:center;font-size:11px;color:var(--muted);margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-mark">11</div>
+    <div class="brand-name">Next<b>Eleven</b></div>
+  </div>
+  <div id="content"><div class="loading">Loading team page…</div></div>
+</div>
+
+<script src="public-stats-core.js"></script>
+<script>
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+// Pre-configured so this page works with zero setup for whoever opens the
+// link — same reasoning as the main app's own DEFAULTS: these values are
+// meant to be public-facing (Supabase's anon key carries no special
+// privileges by itself), and the actual security boundary is entirely
+// inside the get_public_team_data RPC and this feature's RLS policy, not
+// secrecy of the project URL.
+const SUPABASE_URL = 'https://wicydcvdakqopodbxtrl.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpY3lkY3ZkYWtxb3BvZGJ4dHJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2MDA5NTUsImV4cCI6MjA5NzE3Njk1NX0._sIaztNAGi9ffuL8qz84G-q_h5TIKTYbyjcnD9VwbE0';
+
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtDate(d) {
+  if (!d) return '—';
+  const parts = String(d).split('-');
+  if (parts.length===3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return d;
+}
+function shortName(fullName) {
+  if (!fullName) return '';
+  const parts = String(fullName).trim().split(/\s+/);
+  if (parts.length <= 2) return fullName;
+  return parts[0] + ' ' + parts[parts.length - 1];
+}
+
+async function loadTeamPage() {
+  const contentEl = document.getElementById('content');
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+
+  if (!token) {
+    contentEl.innerHTML = `<div class="empty"><div class="icon">🔗</div><strong>No link provided</strong><p>This page needs a share link from a parent or guardian.</p></div>`;
+    return;
+  }
+
+  let data;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_public_team_data`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ p_token: token }),
+    });
+    if (!res.ok) throw new Error('Request failed');
+    data = await res.json();
+  } catch (err) {
+    contentEl.innerHTML = `<div class="empty"><div class="icon">⚠️</div><strong>Couldn't load this page</strong><p>Please check your connection and try again.</p></div>`;
+    return;
+  }
+
+  if (!data) {
+    contentEl.innerHTML = `<div class="empty"><div class="icon">🔒</div><strong>This link isn't available</strong><p>It may have been disabled or replaced with a new one. Ask the team parent for the current link.</p></div>`;
+    return;
+  }
+
+  render(contentEl, data);
+}
+
+function render(el, data) {
+  const games = data.games || [];
+  const gamePlayers = data.gamePlayers || [];
+  const players = data.players || [];
+  const tournaments = data.tournaments || [];
+  const season = data.season || {};
+
+  // Only finished games count toward the record — same rule the main
+  // app's own isGameResultVisible / Team Summary use: the moment kickoff
+  // has passed, a game counts as finished. Games here already exclude
+  // deleted rows; visibility just needs "already happened."
+  const now = new Date();
+  const finishedGames = games.filter(g => {
+    if (!g.date) return false;
+    const kickoff = new Date(`${g.date}T${g.gameTime || '00:00'}`);
+    return !isNaN(kickoff) && now >= kickoff;
+  });
+  const upcomingGames = games.filter(g => !finishedGames.includes(g))
+    .sort((a,b) => gameSortKey(a) - gameSortKey(b));
+
+  const stats = teamSeasonStats(finishedGames, gamePlayers);
+
+  const recent = [...finishedGames].sort((a,b) => gameSortKey(b) - gameSortKey(a)).slice(0, 5);
+  const next = upcomingGames[0];
+
+  const html = `
+    <div class="team-header">
+      <h1>${esc(season.clubName || 'Team')} ${season.ageGroup ? '· ' + esc(season.ageGroup) : ''}</h1>
+      <div class="sub">${esc(season.seasonName || '')}</div>
+    </div>
+
+    ${next ? `
+    <div class="card">
+      <div class="card-title">Next Match</div>
+      <div style="font-weight:700;font-size:15px">${esc(next.opponent)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px">${fmtDate(next.date)}${next.gameTime ? ' · ' + next.gameTime : ''}${next.competitionName ? ' · ' + esc(next.competitionName) : ''}</div>
+    </div>` : ''}
+
+    <div class="card">
+      <div class="card-title">Season Summary</div>
+      <div class="stat-grid">
+        <div><div class="stat-label">Record</div><div class="stat-value">${stats.wins}-${stats.draws}-${stats.losses}</div></div>
+        <div><div class="stat-label">Goal Diff</div><div class="stat-value">${stats.goalDiff>0?'+':''}${stats.goalDiff}</div></div>
+        <div><div class="stat-label">Goals For</div><div class="stat-value">${stats.goalsFor}</div></div>
+        <div><div class="stat-label">Goals Against</div><div class="stat-value">${stats.goalsAgainst}</div></div>
+      </div>
+    </div>
+
+    ${recent.length ? `
+    <div class="card">
+      <div class="card-title">Recent Results</div>
+      ${recent.map(g => {
+        const gps = gamePlayers.filter(r => r.gameId === g.gameId);
+        const our = teamGoals(gps, g);
+        const their = parseInt(g.opponentScore)||0;
+        const res = result(our, their, g);
+        const s = homeAwayScore(g.homeAway, our, their, g.neutralSide);
+        const hasPens = g.ourPenaltyGoals!=null && g.penaltiesForThem!=null;
+        return `<div class="row">
+          <span class="row-name">${esc(g.opponent)}</span>
+          <span class="row-meta">${g.competitionName ? esc(g.competitionName) : ''}</span>
+          <span class="score">${s.home}-${s.away}</span>
+          ${hasPens?`<span class="row-meta">${g.ourPenaltyGoals}-${g.penaltiesForThem}P</span>`:''}
+          <span class="badge badge-${res}">${res}</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    ${tournaments.length ? `
+    <div class="card">
+      <div class="card-title">Tournaments</div>
+      ${tournaments.map(t => {
+        const outcome = getTournamentOutcomePublic(t, games, gamePlayers, 'EN');
+        return `<div class="row">
+          <span class="row-name">${esc(t.name)}</span>
+          <span class="row-meta">${outcome.emoji ? outcome.emoji + ' ' : ''}${esc(outcome.label)}</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    ${players.length ? `
+    <div class="card">
+      <div class="card-title">Squad</div>
+      ${players.map(p => `<div class="row">
+        <span class="squad-num">${p.shirtNumber||'—'}</span>
+        <span class="row-name">${esc(p.fullName)}</span>
+        <span class="row-meta">${p.primaryPosition?esc(p.primaryPosition):''}</span>
+      </div>`).join('')}
+    </div>` : ''}
+
+    ${players.length ? `
+    <div class="card">
+      <div class="card-title">Player Statistics</div>
+      ${players.map(p => {
+        const s = playerPublicStats(p.playerId, finishedGames, gamePlayers);
+        if (s.calledUp === 0) return '';
+        return `<div class="row">
+          <span class="row-name">${esc(shortName(p.fullName))}</span>
+          <span class="pill">${s.calledUp} GP</span>
+          <span class="pill">${s.goals} G</span>
+          <span class="pill">${s.assists} A</span>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
+
+    <div class="footer-note">Shared read-only via NextEleven · Live team data</div>
+  `;
+
+  el.innerHTML = html;
+}
+
+loadTeamPage();
+</script>
+</body>
+</html>
