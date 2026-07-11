@@ -954,6 +954,20 @@ function resolvePlayerName(gp, players, tempPlayers) {
 // shared function every game/tournament/import path uses — nothing
 // re-derives this logic separately, so the rule can't drift between
 // call sites.
+// Reliably derives a season's start year, even for legacy season records
+// that were created before this app consistently saved a startYear field
+// at all — this was the actual root cause of a real bug tonight, where a
+// season's own seasonName clearly showed "2025/26" but its startYear
+// field was missing, so a strict lookup by startYear silently found
+// nothing. seasonName is always "YYYY/YY" format (see buildSeasonName),
+// so parsing the first 4 digits back out is a safe, reliable fallback.
+function getSeasonStartYear(season) {
+  if (!season) return null;
+  if (typeof season.startYear === 'number' && !isNaN(season.startYear)) return season.startYear;
+  const match = /^(\d{4})\//.exec(season.seasonName || '');
+  return match ? parseInt(match[1]) : null;
+}
+
 function getSeasonFromDate(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00');
@@ -6223,10 +6237,10 @@ async function saveTournamentFromForm(tournamentId) {
     const correctStartYear = getSeasonFromDate(refDate);
     const currentSeason = await DB.get('seasons', State.currentSeasonId);
     if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] correctStartYear=${correctStartYear} currentSeason=${JSON.stringify(currentSeason)}`);
-    if (currentSeason && correctStartYear !== null && currentSeason.startYear !== correctStartYear) {
+    if (currentSeason && correctStartYear !== null && getSeasonStartYear(currentSeason) !== correctStartYear) {
       const allSeasons = await DB.getAll('seasons');
       if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] mismatch detected, allSeasons=${JSON.stringify(allSeasons.map(s=>({id:s.seasonId,startYear:s.startYear,name:s.seasonName})))}`);
-      const correctSeason = allSeasons.find(s => s.startYear === correctStartYear);
+      const correctSeason = allSeasons.find(s => getSeasonStartYear(s) === correctStartYear);
       if (correctSeason) {
         correctSeasonId = correctSeason.seasonId;
         mismatchInfo = { correctSeasonName: correctSeason.seasonName, currentSeasonName: currentSeason.seasonName };
@@ -12710,9 +12724,9 @@ async function saveGame() {
   const correctStartYear = getSeasonFromDate(date);
   const currentSeason = await DB.get('seasons', State.currentSeasonId);
   let correctSeasonId = null, mismatchInfo = null;
-  if (currentSeason && correctStartYear !== null && currentSeason.startYear !== correctStartYear) {
+  if (currentSeason && correctStartYear !== null && getSeasonStartYear(currentSeason) !== correctStartYear) {
     const allSeasons = await DB.getAll('seasons');
-    const correctSeason = allSeasons.find(s => s.startYear === correctStartYear);
+    const correctSeason = allSeasons.find(s => getSeasonStartYear(s) === correctStartYear);
     if (correctSeason) {
       correctSeasonId = correctSeason.seasonId;
       mismatchInfo = { correctSeasonName: correctSeason.seasonName, currentSeasonName: currentSeason.seasonName };
@@ -14511,7 +14525,7 @@ async function confirmImport(type, validated) {
     }
     if (store === 'games' && r.data.date) {
       const correctStartYear = getSeasonFromDate(r.data.date);
-      const correctSeason = allSeasons.find(s => s.startYear === correctStartYear);
+      const correctSeason = allSeasons.find(s => getSeasonStartYear(s) === correctStartYear);
       if (correctSeason && correctSeason.seasonId !== r.data.seasonId) {
         r.data.seasonId = correctSeason.seasonId;
         seasonCorrected++;
