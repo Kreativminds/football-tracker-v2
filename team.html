@@ -236,6 +236,15 @@ function render(el, data) {
       }).join('')}
     </div>` : ''}
 
+    ${(data.previousAchievements && data.previousAchievements.length) ? `
+    <div class="card" style="background:#faf7f0;border-color:#e2d9c4">
+      <div class="card-title">Previous Achievements</div>
+      ${data.previousAchievements.map(a => `<div class="row">
+        <span class="row-name">🏆 ${esc(a.title)}</span>
+        <span class="row-meta">${a.date ? fmtDate(a.date) : ''}</span>
+      </div>`).join('')}
+    </div>` : ''}
+
     <div class="footer-note">Shared read-only via NextEleven · Live team data</div>
   `;
 
