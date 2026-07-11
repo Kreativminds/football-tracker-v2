@@ -186,7 +186,7 @@ tr:hover td{background:var(--highlight)}
 .wp-info{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;user-select:none}
 .wp-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#eee;font-size:12px;font-weight:700;flex-shrink:0}
 .wp-row.wp-active .wp-num{background:var(--black);color:#fff}
-.wp-name{flex:1;font-size:14px;font-weight:600}
+.wp-name{flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:80px}
 .wp-pos{font-size:11px;color:var(--muted)}
 .wp-role-toggle{display:flex;gap:6px;padding:0 14px 12px}
 .wp-role-btn{flex:1;padding:8px;border:1px solid var(--border);border-radius:5px;background:#fff;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer}
@@ -909,7 +909,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // CONFIG
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
-  APP_VERSION: '1.1.0',
+  APP_VERSION: '1.2.0',
   SCHEMA_VERSION: 13,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
@@ -1863,17 +1863,21 @@ async function renderOpponentsTab() {
       <div class="who-played-list">
         ${all.map(o => `
           <div class="wp-row">
-            <div class="wp-info" style="cursor:default">
-              ${o.logoUrl
-                ? `<img src="${esc(o.logoUrl)}" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;background:#f0f0f0" onerror="this.outerHTML='<div style=&quot;width:28px;height:28px;background:#fde8e8;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#b03030&quot;>&#9888;</div>'">`
-                : `<span class="wp-num">&#127944;</span>`}
-              <span class="wp-name">${esc(o.opponentName)}</span>
-              ${o.ageGroup?`<span class="pos-pill" style="margin-left:6px">${esc(o.ageGroup)}</span>`:''}
-              ${o.level?`<span class="pos-pill">${esc(o.level)}</span>`:''}
-              <span style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">
-                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editOpponent(${o.opponentId})">${I18n.t('common_edit')}</button>
-                <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteOpponent(${o.opponentId})">${I18n.t('common_delete')}</button>
-              </span>
+            <div style="padding:12px 14px">
+              <div style="display:flex;align-items:center;gap:10px">
+                ${o.logoUrl
+                  ? `<img src="${esc(o.logoUrl)}" style="width:28px;height:28px;object-fit:contain;border-radius:4px;flex-shrink:0;background:#f0f0f0" onerror="this.outerHTML='<div style=&quot;width:28px;height:28px;background:#fde8e8;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#b03030&quot;>&#9888;</div>'">`
+                  : `<span class="wp-num">&#127944;</span>`}
+                <span style="flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${esc(o.opponentName)}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap">
+                ${o.ageGroup?`<span class="pos-pill">${esc(o.ageGroup)}</span>`:''}
+                ${o.level?`<span class="pos-pill">${esc(o.level)}</span>`:''}
+                <span style="margin-left:auto;display:flex;gap:6px">
+                  <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editOpponent(${o.opponentId})">${I18n.t('common_edit')}</button>
+                  <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteOpponent(${o.opponentId})">${I18n.t('common_delete')}</button>
+                </span>
+              </div>
             </div>
           </div>`).join('')}
       </div>`}
@@ -11872,7 +11876,10 @@ const Sync = (() => {
     let pushed = 0;
     for (const store of SYNC_STORES) {
       let records;
-      try { records = await DB.getAll(store); } catch(e) { continue; }
+      try { records = await DB.getAll(store); } catch(e) {
+        log(`Push skipped store "${store}" — ${e.message || 'store unavailable, may need an app reload to apply a pending database upgrade'}`);
+        continue;
+      }
       if (store === 'players') {
         records.forEach(r => log(`[DEBUG players] key=${r.playerId} syncStatus=${r.syncStatus} viewerPin=${r.viewerPin}`));
       }
@@ -12020,6 +12027,16 @@ const Sync = (() => {
       if (!silent) Toast.error(I18n.t('sync_err_failed', {msg: e.message}));
     }
     updateSyncUI();
+    // The visible "Pending: N records" count was previously only ever
+    // calculated once, when Settings first loaded — it never refreshed
+    // after a sync actually ran, so it could show a stale, higher number
+    // long after the real pending count had genuinely dropped to zero.
+    // This was purely a display bug: push()/pull() themselves always
+    // worked from the live, current data.
+    const pendingEl = document.getElementById('syncPendingCount');
+    if (pendingEl) {
+      getPendingCount().then(n => { pendingEl.textContent = n; });
+    }
   }
 
   // ── RESET CLOUD IDs — clears cloudId so next push is all INSERTs ──────────
