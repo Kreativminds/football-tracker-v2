@@ -2301,6 +2301,12 @@ const TR = {
     ach_title_stage_runnerup:'{stage} Runner-up', ach_title_semifinalist:'Semi-finalist', ach_title_quarterfinalist:'Quarter-finalist',
     ach_title_r16:'Round of 16', ach_title_group_stage:'Group Stage', ach_title_participant:'Participant',
     ach_btn_remove_auto:'Remove from Achievements',
+    ach_unknown_season:'Unknown season', ach_current_season_badge:'Current',
+    ach_detail_season_club_label:'Season & Club', ach_detail_description_label:'Description',
+    club_detail_subtitle:'Career history at this club', club_detail_seasons_label:'Seasons Played',
+    club_detail_no_seasons:'No seasons found for this club.', club_detail_achievements_label:'Achievements',
+    club_detail_no_achievements:'No achievements recorded during these seasons.',
+
     tourn_confirm_delete_title:'Delete Tournament?', tourn_confirm_delete_body:'This removes the tournament and its auto-generated achievements. Games already linked to it are not deleted.',
     tourn_confirm_season_mismatch_title:'Wrong season?', tourn_confirm_season_mismatch_body:'This belongs to {season}, not the currently active {current}, based on its dates. Move it to {season} automatically?', import_season_corrected:'rows auto-corrected to their real season',
 
@@ -3298,6 +3304,12 @@ const TR = {
     ach_title_stage_runnerup:'Vice-campeão {stage}', ach_title_semifinalist:'Meia-finalista', ach_title_quarterfinalist:'Quartos-finalista',
     ach_title_r16:'Oitavos de Final', ach_title_group_stage:'Fase de Grupos', ach_title_participant:'Participante',
     ach_btn_remove_auto:'Remover dos Feitos',
+    ach_unknown_season:'Época desconhecida', ach_current_season_badge:'Atual',
+    ach_detail_season_club_label:'Época e Clube', ach_detail_description_label:'Descrição',
+    club_detail_subtitle:'Histórico de carreira neste clube', club_detail_seasons_label:'Épocas Jogadas',
+    club_detail_no_seasons:'Não foram encontradas épocas para este clube.', club_detail_achievements_label:'Feitos',
+    club_detail_no_achievements:'Sem feitos registados durante estas épocas.',
+
     tourn_confirm_delete_title:'Eliminar Torneio?', tourn_confirm_delete_body:'Isto remove o torneio e os seus feitos gerados automaticamente. Os jogos já ligados não são eliminados.',
     tourn_confirm_season_mismatch_title:'Época errada?', tourn_confirm_season_mismatch_body:'Isto pertence a {season}, não à época atual {current}, com base nas datas. Mover automaticamente para {season}?', import_season_corrected:'linhas corrigidas automaticamente para a época correta',
 
@@ -8149,13 +8161,79 @@ async function renderPlayerClubHistory(playerId) {
                 ${c.notes?`<div class="ti-desc">${esc(c.notes)}</div>`:''}
               </div>
             </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
+            <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
               <button class="btn btn-secondary btn-sm" onclick="editClubHistoryEntry(${playerId},${c.clubHistoryId})">${I18n.t('common_edit')}</button>
               <button class="btn btn-danger btn-sm" onclick="deleteClubHistoryEntry(${playerId},${c.clubHistoryId})">${I18n.t('common_delete')}</button>
             </div>
           </div>
         </div>`).join('')}
     </div>`}`;
+
+  // Make each row clickable (opening the club detail view) without
+  // disturbing the existing Edit/Delete buttons, which already stop
+  // their own click from bubbling via the wrapper added above.
+  el.querySelectorAll('.timeline-item').forEach((rowEl, i) => {
+    const entry = all[i];
+    if (entry) {
+      rowEl.style.cursor = 'pointer';
+      rowEl.onclick = () => openClubDetail(playerId, entry.clubName);
+    }
+  });
+}
+
+// Club detail view — shows every season matched by club name (best-effort
+// text match against clubHistory.clubName, since neither clubHistory nor
+// seasons has a structural link between them today) plus every
+// achievement earned during those seasons. Deliberately a read/display
+// improvement only, per the approved scope — no new fields added.
+async function openClubDetail(playerId, clubName) {
+  if (!clubName) return;
+  const nameLower = clubName.trim().toLowerCase();
+  const allSeasons = await DB.getAll('seasons');
+  const matchingSeasons = allSeasons.filter(s => (s.clubName||'').trim().toLowerCase() === nameLower);
+  const matchingSeasonIds = new Set(matchingSeasons.map(s => s.seasonId));
+
+  const allAchievements = (await DB.getAll('achievements'))
+    .filter(a => (!a.playerId || a.playerId === playerId) && !a.dismissed && matchingSeasonIds.has(a.seasonId));
+  allAchievements.sort((a,b) => gameSortKey(b) - gameSortKey(a));
+
+  matchingSeasons.sort((a,b) => (getSeasonStartYear(b)||0) - (getSeasonStartYear(a)||0));
+
+  const catIcon = c => c==='Trophy'?'&#127942;':c==='Award'?'&#127941;':c==='Milestone'?'&#127937;':'&#11088;';
+  const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:480px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:20px;font-weight:800">${esc(clubName)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">${I18n.t('club_detail_subtitle')}</div>
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">${I18n.t('club_detail_seasons_label')}</div>
+        ${!matchingSeasons.length ? `<p style="font-size:12px;color:var(--muted)">${I18n.t('club_detail_no_seasons')}</p>` :
+          matchingSeasons.map(s => `<div style="font-size:13px;font-weight:600;padding:6px 0;border-bottom:1px solid var(--border)">${esc(s.seasonName)}${s.ageGroup?' · '+esc(s.ageGroup):''}</div>`).join('')}
+      </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-title">${I18n.t('club_detail_achievements_label')}</div>
+        ${!allAchievements.length ? `<p style="font-size:12px;color:var(--muted)">${I18n.t('club_detail_no_achievements')}</p>` :
+          allAchievements.map(a => {
+            const s = allSeasons.find(x => x.seasonId === a.seasonId);
+            return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+              <div style="font-size:13px;font-weight:700">${catIcon(a.category)} ${esc(a.title)}</div>
+              <div style="font-size:11px;color:var(--muted)">${catLabel(a.category)}${a.date?' · '+fmtDate(a.date):''}${s?' · '+esc(s.seasonName):''}</div>
+            </div>`;
+          }).join('')}
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="this.closest('.rm-form-overlay').remove()">${I18n.t('common_close')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 function openClubHistoryForm(playerId, entry) {
@@ -8225,7 +8303,34 @@ async function renderPlayerAchievements(playerId) {
   const all = (await DB.getAll('achievements')).filter(a => (!a.playerId || a.playerId === playerId) && !a.dismissed);
   all.sort((a,b) => gameSortKey(b) - gameSortKey(a));
 
+  // Club is deliberately never stored on the achievement itself — it's
+  // derived fresh each time from achievement.seasonId -> season.clubName.
+  // This is the single source of truth (a season's own club field), so
+  // there's nothing to keep in sync if a season's club name is ever
+  // corrected later. All seasons fetched once up front to avoid a
+  // separate DB call per achievement.
+  const allSeasons = await DB.getAll('seasons');
+  const seasonById = {};
+  allSeasons.forEach(s => { seasonById[s.seasonId] = s; });
+
+  // Group by season (most recent season first, matching the existing
+  // most-recent-first sort already applied to achievements themselves)
+  // so past-season achievements are clearly separated rather than mixed
+  // in one flat list with no visual grouping.
+  const bySeasonId = {};
+  const seasonOrder = [];
+  all.forEach(a => {
+    const sid = a.seasonId || 'unknown';
+    if (!bySeasonId[sid]) { bySeasonId[sid] = []; seasonOrder.push(sid); }
+    bySeasonId[sid].push(a);
+  });
+  seasonOrder.sort((a, b) => {
+    const sa = seasonById[a], sb = seasonById[b];
+    return (getSeasonStartYear(sb) || 0) - (getSeasonStartYear(sa) || 0);
+  });
+
   const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
+  const catIcon = c => c==='Trophy'?'&#127942;':c==='Award'?'&#127941;':c==='Milestone'?'&#127937;':'&#11088;';
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -8251,26 +8356,73 @@ async function renderPlayerAchievements(playerId) {
       <input type="hidden" id="af-id-${playerId}">
     </div>
     ${!all.length ? `<div class="empty"><strong>${I18n.t('ach_empty_title')}</strong><p>${I18n.t('ach_empty_desc')}</p></div>` :
-    `<div class="timeline-list">
-      ${all.map(a=>`
-        <div class="timeline-item">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start">
-            <div>
-              <div class="ti-title">${a.category==='Trophy'?'&#127942;':a.category==='Award'?'&#127941;':a.category==='Milestone'?'&#127937;':'&#11088;'} ${esc(a.title)}</div>
-              <div class="ti-meta">${catLabel(a.category)} ${a.date?'· '+fmtDate(a.date):''}</div>
-              ${a.description?`<div class="ti-desc">${esc(a.description)}</div>`:''}
-            </div>
-            <div style="display:flex;gap:6px;flex-shrink:0">
-              ${a.autoGenerated ? `
-                <button class="btn btn-secondary btn-sm" onclick="dismissTournamentAchievement(${a.achievementId});renderPlayerAchievements(${playerId})">${I18n.t('ach_btn_remove_auto')}</button>
-              ` : `
-                <button class="btn btn-secondary btn-sm" onclick="editAchievementEntry(${playerId},${a.achievementId})">${I18n.t('common_edit')}</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteAchievementEntry(${playerId},${a.achievementId})">${I18n.t('common_delete')}</button>
-              `}
-            </div>
-          </div>
-        </div>`).join('')}
-    </div>`}`;
+    seasonOrder.map(sid => {
+      const season = seasonById[sid];
+      const seasonLabel = season ? season.seasonName : I18n.t('ach_unknown_season');
+      const isCurrentSeason = sid === State.currentSeasonId;
+      return `
+      <div style="margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          ${esc(seasonLabel)}${season?.clubName?' · '+esc(season.clubName):''} ${isCurrentSeason?`<span class="pos-pill" style="margin-left:6px">${I18n.t('ach_current_season_badge')}</span>`:''}
+        </div>
+        <div class="timeline-list">
+          ${bySeasonId[sid].map(a=>`
+            <div class="timeline-item" style="cursor:pointer" onclick="openAchievementDetail(${playerId},${a.achievementId})">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                  <div class="ti-title">${catIcon(a.category)} ${esc(a.title)}</div>
+                  <div class="ti-meta">${catLabel(a.category)} ${a.date?'· '+fmtDate(a.date):''}</div>
+                  ${a.description?`<div class="ti-desc">${esc(a.description)}</div>`:''}
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+                  ${a.autoGenerated ? `
+                    <button class="btn btn-secondary btn-sm" onclick="dismissTournamentAchievement(${a.achievementId});renderPlayerAchievements(${playerId})">${I18n.t('ach_btn_remove_auto')}</button>
+                  ` : `
+                    <button class="btn btn-secondary btn-sm" onclick="editAchievementEntry(${playerId},${a.achievementId})">${I18n.t('common_edit')}</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAchievementEntry(${playerId},${a.achievementId})">${I18n.t('common_delete')}</button>
+                  `}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+// Full detail view for a single achievement — shown in the same overlay
+// pattern already used elsewhere (Confirm-style modal), clearly showing
+// the season and club it belongs to. Club is derived fresh here too,
+// never read from a stored field on the achievement.
+async function openAchievementDetail(playerId, achievementId) {
+  const a = await DB.get('achievements', achievementId);
+  if (!a) return;
+  const season = a.seasonId ? await DB.get('seasons', a.seasonId) : null;
+  const catLabel = c => ({Trophy:I18n.t('cat_trophy'),Award:I18n.t('cat_award'),Milestone:I18n.t('cat_milestone'),Personal:I18n.t('cat_personal'),Team:I18n.t('cat_team')}[c] || c || '');
+  const catIcon = c => c==='Trophy'?'&#127942;':c==='Award'?'&#127941;':c==='Milestone'?'&#127937;':'&#11088;';
+
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:420px">
+      <div style="text-align:center;margin-bottom:16px">
+        <div style="font-size:32px">${catIcon(a.category)}</div>
+        <div style="font-size:18px;font-weight:800;margin-top:6px">${esc(a.title)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">${catLabel(a.category)}${a.date?' · '+fmtDate(a.date):''}</div>
+      </div>
+      <div class="card" style="background:var(--bg);margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${I18n.t('ach_detail_season_club_label')}</div>
+        <div style="font-size:14px;font-weight:700">${season ? esc(season.seasonName) : I18n.t('ach_unknown_season')}${season?.clubName ? ' · ' + esc(season.clubName) : ''}</div>
+      </div>
+      ${a.description ? `
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${I18n.t('ach_detail_description_label')}</div>
+        <div style="font-size:13px;line-height:1.6">${esc(a.description)}</div>
+      </div>` : ''}
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="this.closest('.rm-form-overlay').remove()">${I18n.t('common_close')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 function openAchievementForm(playerId, entry) {
@@ -8313,6 +8465,7 @@ async function saveAchievementEntry(playerId) {
   Toast.show(I18n.t('ach_saved'));
   document.getElementById(`achievementForm-${playerId}`)?.classList.add('panel-hidden');
   await renderPlayerAchievements(playerId);
+  Sync.scheduleAutoSync();
 }
 
 async function deleteAchievementEntry(playerId, id) {
