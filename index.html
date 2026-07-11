@@ -9663,10 +9663,19 @@ async function handleSyncNow() {
   if (!Auth.isLoggedIn()) { Toast.error(I18n.t('acc_err_login_required')); return; }
   await Sync.run(false);
   Sync.updateSyncUI();
-  // Refresh current section without resetting location
+  // Refresh current section without resetting location. Render.settings()
+  // internally defaults to the Seasons tab every time it runs (its own
+  // switchSettingsTab('seasons') call), which silently overwrites
+  // State.currentSettingsTab in the process — so the real tab must be
+  // captured BEFORE calling Render.settings(), not read afterward, or
+  // this "restore" ends up restoring the wrong value every time.
   if (State.currentSection === 'home')      await Render.home();
   if (State.currentSection === 'dashboard') await Render.dashboard();
-  if (State.currentSection === 'settings')  { await Render.settings(); switchSettingsTab(State.currentSettingsTab); }
+  if (State.currentSection === 'settings')  {
+    const tabBeforeRender = State.currentSettingsTab;
+    await Render.settings();
+    switchSettingsTab(tabBeforeRender);
+  }
   updateDashSyncStatus();
   const el = document.getElementById('syncPendingCount');
   if (el) el.textContent = await Sync.getPendingCount();
