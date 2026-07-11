@@ -947,6 +947,25 @@ function resolvePlayerName(gp, players, tempPlayers) {
 // the single place that combines date + kickoff time into one comparable
 // value; every games .sort() call in the app should use this rather than
 // re-deriving the same logic separately at each call site.
+// A season with startYear Y covers September 1 of year Y through July 31
+// of year Y+1 — the standard football-season window, not the calendar
+// year. Given a real date, returns the startYear of the season that date
+// actually belongs to, regardless of which season happens to be "active"
+// in the app at the time — this is the one source of truth both the
+// tournament-season-fix control and the create/edit validation warning
+// use, so the rule can't drift between the two.
+function seasonStartYearForDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d)) return null;
+  const month = d.getMonth() + 1; // 1-12
+  const year = d.getFullYear();
+  // Aug (8) counted as still-current-season for practical pre-season
+  // activity, exactly like Sept onward; only Jan-Jul roll back to the
+  // previous startYear.
+  return month >= 8 ? year : year - 1;
+}
+
 function gameSortKey(game) {
   if (!game || !game.date) return 0;
   return new Date(`${game.date}T${game.gameTime || '00:00'}`).getTime();
@@ -2266,6 +2285,13 @@ const TR = {
     ach_title_r16:'Round of 16', ach_title_group_stage:'Group Stage', ach_title_participant:'Participant',
     ach_btn_remove_auto:'Remove from Achievements',
     tourn_confirm_delete_title:'Delete Tournament?', tourn_confirm_delete_body:'This removes the tournament and its auto-generated achievements. Games already linked to it are not deleted.',
+    tourn_season_mismatch_warning:'This tournament\'s dates don\'t match its assigned season. Based on its dates, it likely belongs to {season}.',
+    tourn_season_mismatch_no_target:'This tournament\'s dates suggest it belongs to {season}, but that season doesn\'t exist yet — create it first if you want to move this tournament there.',
+    tourn_btn_move_to_season:'Move to {season}',
+    tourn_confirm_move_title:'Move tournament?', tourn_confirm_move_body:'This moves the tournament, its games, and their player records to the correct season.',
+    tourn_moved_toast:'Tournament moved to the correct season.',
+    tourn_confirm_season_mismatch_title:'Wrong season?', tourn_confirm_season_mismatch_body:'These dates look like they belong to {season}, not the currently active {current}. Save here anyway?',
+
     tourn_deleted:'Tournament deleted.',
     tourn_tap_hint:'Tap a tournament to see its full summary.',
     tourn_show_games:'Show Games', tourn_hide_games:'Hide Games',
@@ -3245,6 +3271,13 @@ const TR = {
     ach_title_r16:'Oitavos de Final', ach_title_group_stage:'Fase de Grupos', ach_title_participant:'Participante',
     ach_btn_remove_auto:'Remover dos Feitos',
     tourn_confirm_delete_title:'Eliminar Torneio?', tourn_confirm_delete_body:'Isto remove o torneio e os seus feitos gerados automaticamente. Os jogos já ligados não são eliminados.',
+    tourn_season_mismatch_warning:'As datas deste torneio não correspondem à época atribuída. Com base nas datas, provavelmente pertence a {season}.',
+    tourn_season_mismatch_no_target:'As datas sugerem que este torneio pertence a {season}, mas essa época ainda não existe — crie-a primeiro se quiser mover o torneio para lá.',
+    tourn_btn_move_to_season:'Mover para {season}',
+    tourn_confirm_move_title:'Mover torneio?', tourn_confirm_move_body:'Isto move o torneio, os seus jogos e os registos dos jogadores para a época correta.',
+    tourn_moved_toast:'Torneio movido para a época correta.',
+    tourn_confirm_season_mismatch_title:'Época errada?', tourn_confirm_season_mismatch_body:'Estas datas parecem pertencer a {season}, não à época atual {current}. Guardar mesmo assim?',
+
     tourn_deleted:'Torneio eliminado.',
     tourn_tap_hint:'Toque num torneio para ver o resumo completo.',
     tourn_show_games:'Mostrar Jogos', tourn_hide_games:'Ocultar Jogos',
@@ -6140,6 +6173,7 @@ async function openTournamentForm(tournamentId) {
       ${existing ? `<div data-tourn-player-section>${await renderTournamentPlayerSelection(existing)}</div>` : ''}
       ${existing ? await renderTournamentTempPlayersList(existing) : ''}
       ${existing ? `<button type="button" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:10px" onclick="openTemporaryPlayerForm(null, ${existing.tournamentId})">+ ${I18n.t('tempp_new_title')}</button>` : ''}
+      ${existing ? await renderTournamentMoveSeasonControl(existing) : ''}
       <div class="form-actions">
         <button class="btn btn-primary" onclick="saveTournamentFromForm(${tournamentId ?? 'null'})">${I18n.t('common_save')}</button>
         <button class="btn btn-secondary" onclick="document.getElementById('tournamentFormOverlay').remove()">${I18n.t('common_cancel')}</button>
@@ -6152,29 +6186,67 @@ async function openTournamentForm(tournamentId) {
 async function saveTournamentFromForm(tournamentId) {
   const name = document.getElementById('tf-name')?.value.trim();
   if (!name) { Toast.error(I18n.t('tourn_err_name_required')); return; }
-  // Re-fetch fresh here, not reused from when the form first opened — if a
-  // temp player was added while this form was open (via the "+ Add Temp
-  // Player" button on top of it), that link already exists in the database
-  // by now. Using a stale in-memory copy of the tournament from page-load
-  // time would silently overwrite that just-added link the moment Save is
-  // clicked, which was the actual bug being reported.
-  const existing = tournamentId ? await getTournamentById(tournamentId) : null;
-  const tournament = {
-    seasonId: State.currentSeasonId,
-    name,
-    location: document.getElementById('tf-location')?.value.trim() || '',
-    category: document.getElementById('tf-category')?.value.trim() || '',
-    startDate: document.getElementById('tf-start')?.value || '',
-    endDate: document.getElementById('tf-end')?.value || '',
-    notes: document.getElementById('tf-notes')?.value.trim() || '',
-    team: existing?.team || { playerIds: [], temporaryPlayerIds: [] },
+  const startDateVal = document.getElementById('tf-start')?.value || '';
+  const endDateVal = document.getElementById('tf-end')?.value || '';
+
+  // Do not silently trust the currently-active season just because it's
+  // selected — check the tournament's own dates against the real
+  // September-July season window and warn (not block) if they disagree.
+  // This is exactly the mistake that prompted this check: test data
+  // entered while a different season was active, silently inheriting
+  // the wrong seasonId with no warning at all.
+  //
+  // Confirm.show's callback only ever fires on confirm, never on cancel
+  // — there is no cancel callback in this app's dialog pattern. So rather
+  // than await a value that would hang forever if cancelled, the actual
+  // save logic below is wrapped in its own function and only ever
+  // called directly (no mismatch) or from inside the confirm callback
+  // (mismatch, user chose to proceed anyway).
+  const refDate = startDateVal || endDateVal;
+  let mismatchWarning = null;
+  if (refDate) {
+    const correctStartYear = seasonStartYearForDate(refDate);
+    const currentSeason = await DB.get('seasons', State.currentSeasonId);
+    if (currentSeason && correctStartYear !== null && currentSeason.startYear !== correctStartYear) {
+      mismatchWarning = { correctStartYear, currentSeasonName: currentSeason.seasonName };
+    }
+  }
+
+  const doSave = async () => {
+    // Re-fetch fresh here, not reused from when the form first opened — if a
+    // temp player was added while this form was open (via the "+ Add Temp
+    // Player" button on top of it), that link already exists in the database
+    // by now. Using a stale in-memory copy of the tournament from page-load
+    // time would silently overwrite that just-added link the moment Save is
+    // clicked, which was the actual bug being reported.
+    const existing = tournamentId ? await getTournamentById(tournamentId) : null;
+    const tournament = {
+      seasonId: State.currentSeasonId,
+      name,
+      location: document.getElementById('tf-location')?.value.trim() || '',
+      category: document.getElementById('tf-category')?.value.trim() || '',
+      startDate: startDateVal,
+      endDate: endDateVal,
+      notes: document.getElementById('tf-notes')?.value.trim() || '',
+      team: existing?.team || { playerIds: [], temporaryPlayerIds: [] },
+    };
+    if (tournamentId) tournament.tournamentId = tournamentId;
+    const savedId = await createTournament(tournament);
+    document.getElementById('tournamentFormOverlay')?.remove();
+    Toast.show(I18n.t('tourn_saved'));
+    await syncTournamentAchievements(tournamentId || savedId);
+    renderTournamentGamesTab();
   };
-  if (tournamentId) tournament.tournamentId = tournamentId;
-  const savedId = await createTournament(tournament);
-  document.getElementById('tournamentFormOverlay')?.remove();
-  Toast.show(I18n.t('tourn_saved'));
-  await syncTournamentAchievements(tournamentId || savedId);
-  renderTournamentGamesTab();
+
+  if (mismatchWarning) {
+    Confirm.show(
+      I18n.t('tourn_confirm_season_mismatch_title'),
+      I18n.t('tourn_confirm_season_mismatch_body', {season: buildSeasonName(mismatchWarning.correctStartYear), current: mismatchWarning.currentSeasonName}),
+      doSave
+    );
+  } else {
+    await doSave();
+  }
 }
 
 // Minimal delete for a tournament — soft-deletes the tournament record
@@ -6184,6 +6256,78 @@ async function saveTournamentFromForm(tournamentId) {
 // become ordinary games with a dangling tournamentId, same as any other
 // data relationship in this app; the guardian can reassign or delete them
 // separately if needed.
+// Moves a tournament to a different season, taking its linked games and
+// those games' gamePlayers rows along with it — all three need to move
+// together consistently, since leaving games behind in the old season
+// (or gamePlayers behind from the games) would silently split one
+// tournament's data across two seasons. Existing achievements for this
+// tournament are also re-synced afterward, so their embedded description
+// (if it references the season) and future regeneration stay correct.
+async function moveTournamentToSeason(tournamentId, newSeasonId) {
+  const tournament = await getTournamentById(tournamentId);
+  if (!tournament) return;
+  const oldSeasonId = tournament.seasonId;
+  if (oldSeasonId === newSeasonId) return;
+
+  await Backup.create('before-move-tournament-season');
+
+  tournament.seasonId = newSeasonId;
+  await DB.put('tournaments', tournament);
+
+  const gamesInOldSeason = await DB.getAll('games', 'seasonId', oldSeasonId);
+  const games = gamesInOldSeason.filter(g => g.tournamentId === tournamentId);
+  for (const game of games) {
+    game.seasonId = newSeasonId;
+    await DB.put('games', game);
+    const gps = await DB.getAll('gamePlayers', 'gameId', game.gameId);
+    for (const gp of gps) {
+      gp.seasonId = newSeasonId;
+      await DB.put('gamePlayers', gp);
+    }
+  }
+
+  await syncTournamentAchievements(tournamentId);
+}
+
+// Warns when a tournament's own dates don't match the September-July
+// season window it's currently assigned to, and offers a one-tap fix
+// using moveTournamentToSeason. Silent (renders nothing) when the
+// tournament's dates are missing or already consistent with its season —
+// this is a correction aid for mistakes, not a control shown every time.
+async function renderTournamentMoveSeasonControl(tournament) {
+  const refDate = tournament.startDate || tournament.endDate;
+  if (!refDate) return '';
+  const correctStartYear = seasonStartYearForDate(refDate);
+  if (correctStartYear === null) return '';
+
+  const currentSeason = await DB.get('seasons', tournament.seasonId);
+  if (!currentSeason || currentSeason.startYear === correctStartYear) return '';
+
+  const allSeasons = await DB.getAll('seasons');
+  const correctSeason = allSeasons.find(s => s.startYear === correctStartYear);
+  if (!correctSeason) {
+    // The right season doesn't exist yet in this app — nothing to move
+    // to, so just flag the mismatch without offering a broken action.
+    return `<div class="card" style="margin-bottom:14px;padding:12px;background:#fbf3d9;border:1px solid #d9c26b">
+      <div style="font-size:12px;color:#8a6d1e">${I18n.t('tourn_season_mismatch_no_target', {season: buildSeasonName(correctStartYear)})}</div>
+    </div>`;
+  }
+
+  return `<div class="card" style="margin-bottom:14px;padding:12px;background:#fbf3d9;border:1px solid #d9c26b">
+    <div style="font-size:12px;color:#8a6d1e;margin-bottom:8px">${I18n.t('tourn_season_mismatch_warning', {season: correctSeason.seasonName})}</div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="handleMoveTournamentSeason(${tournament.tournamentId}, ${correctSeason.seasonId})">${I18n.t('tourn_btn_move_to_season', {season: correctSeason.seasonName})}</button>
+  </div>`;
+}
+
+async function handleMoveTournamentSeason(tournamentId, newSeasonId) {
+  Confirm.show(I18n.t('tourn_confirm_move_title'), I18n.t('tourn_confirm_move_body'), async () => {
+    await moveTournamentToSeason(tournamentId, newSeasonId);
+    Toast.show(I18n.t('tourn_moved_toast'));
+    document.getElementById('tournamentFormOverlay')?.remove();
+    renderTournamentGamesTab();
+  });
+}
+
 async function deleteTournament(tournamentId) {
   Confirm.show(I18n.t('tourn_confirm_delete_title'), I18n.t('tourn_confirm_delete_body'), async () => {
     await Backup.create('before-delete');
