@@ -11032,7 +11032,7 @@ const Render = (() => {
             ${I18n.t('set_pending_prefix')} <strong id="syncPendingCount">—</strong> ${I18n.t('set_pending_suffix')} &nbsp;·&nbsp;
             ${I18n.t('set_device_id_label')} <span id="syncDeviceId" style="font-family:monospace">${syncCfg.deviceId||'—'}</span>
           </div>
-          <div id="syncLog" class="sync-log"></div>
+          <div id="syncLog" class="sync-log">${Sync.getRestoredLogHtml ? Sync.getRestoredLogHtml() : ''}</div>
           <button class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="document.getElementById('syncLog').style.display=document.getElementById('syncLog').style.display==='none'?'block':'none'">${I18n.t('set_btn_toggle_sync_log')}</button>
         </div>
       </div>
@@ -11055,8 +11055,21 @@ const Render = (() => {
 
       </div><!-- end stab-panel-danger -->    `;
 
-    // Default to seasons tab
-    switchSettingsTab('seasons');
+    // Default to the tab the user was actually on, whether restored from
+    // a page reload (sessionStorage) or already tracked in State from
+    // earlier in this session — only fall back to Seasons if neither
+    // exists. Previously this unconditionally reset to Seasons every
+    // single time this function ran, silently overwriting
+    // State.currentSettingsTab before any caller (page-reload restore,
+    // post-sync tab restore) got a chance to read the real value —
+    // which is why Cloud Sync specifically kept reverting on refresh.
+    let tabToShow = 'seasons';
+    try {
+      const savedTab = sessionStorage.getItem('squadTracker_settingsTab');
+      if (savedTab) tabToShow = savedTab;
+    } catch(e) {}
+    if (State.currentSettingsTab) tabToShow = State.currentSettingsTab;
+    switchSettingsTab(tabToShow);
     updateSeasonNamePreview();
     renderAccountCard();
     renderShareTeamCard();
@@ -11587,7 +11600,14 @@ const Sync = (() => {
   let _status = 'disconnected'; // disconnected | connected | syncing | error
   let _lastSync = null;
   let _pendingCount = 0;
+  // Restored from sessionStorage so the visible sync log survives a real
+  // page refresh, not just in-app navigation — previously this only lived
+  // in memory and was silently lost the moment the page actually reloaded.
   let _log = [];
+  try {
+    const saved = sessionStorage.getItem('squadTracker_syncLog');
+    if (saved) _log = JSON.parse(saved);
+  } catch(e) {}
 
   // Stores that sync to cloud (backups excluded — too large)
   // Fixed: this used to be its own separate, stale 8-store array that
@@ -11599,11 +11619,19 @@ const Sync = (() => {
   // of truth for "which stores sync" going forward.
   const SYNC_STORES = [...SYNC_STORES_SET];
 
+  // Renders whatever log lines were restored from sessionStorage, so the
+  // sync log div shows its previous content immediately on page load
+  // rather than staying empty until the next log() call happens.
+  function getRestoredLogHtml() {
+    return _log.map(l=>`<div>${l}</div>`).join('');
+  }
+
   function log(msg) {
     const line = new Date().toLocaleTimeString() + ' — ' + msg;
     _log.push(line);
     if (_log.length > 100) _log.shift();
     console.log('[Sync]', msg);
+    try { sessionStorage.setItem('squadTracker_syncLog', JSON.stringify(_log)); } catch(e) {}
     const el = document.getElementById('syncLog');
     if (el) { el.innerHTML = _log.map(l=>`<div>${l}</div>`).join(''); el.scrollTop = el.scrollHeight; }
   }
@@ -12191,7 +12219,7 @@ const Sync = (() => {
     }
   }
 
-  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote, fetchOwnProfile, claimAccountCode, generateTeamShareLink, setTeamShareEnabled, getTeamShareLink };
+  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote, fetchOwnProfile, claimAccountCode, generateTeamShareLink, setTeamShareEnabled, getTeamShareLink, getRestoredLogHtml };
 })();
 
 function attachEvents() {
