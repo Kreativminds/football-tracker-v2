@@ -11940,7 +11940,36 @@ const Sync = (() => {
             }
           } else {
             // INSERT new row — no id field sent, Supabase generates it
-            result = await supabaseRequest('POST', storeToTable(store), cloudRow);
+            try {
+              result = await supabaseRequest('POST', storeToTable(store), cloudRow);
+            } catch(insertErr) {
+              // A 23505 unique-constraint violation on a genuine INSERT
+              // (record.cloudId was falsy, meaning the local record
+              // believes it has never synced) means a row with this exact
+              // user_id + device_id + local_id already exists in Supabase
+              // — this record WAS pushed successfully at some point, but
+              // its cloudId was lost locally (a Reset & Re-sync run, an
+              // old backup restored, etc). Recover by looking up that
+              // already-existing row and re-linking to it, instead of
+              // leaving this record permanently stuck retrying an INSERT
+              // that can never succeed.
+              if (insertErr.message && insertErr.message.includes('23505')) {
+                log('INSERT hit duplicate key (likely orphaned cloudId) — looking up existing row to re-link | store:' + store);
+                const existing = await supabaseRequest('GET', storeToTable(store), null, {
+                  user_id: 'eq.' + Auth.getUserId(),
+                  device_id: 'eq.' + _cfg.deviceId,
+                  local_id: 'eq.' + localId,
+                });
+                if (existing && existing[0] && existing[0].id) {
+                  result = existing;
+                  log('Re-linked to existing cloud row | store:' + store + ' | cloudId:' + existing[0].id);
+                } else {
+                  throw insertErr; // couldn't find the row to re-link to — surface the original error
+                }
+              } else {
+                throw insertErr;
+              }
+            }
           }
 
           // Save returned Supabase id as cloudId in local record
