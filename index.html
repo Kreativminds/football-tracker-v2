@@ -6218,19 +6218,27 @@ async function saveTournamentFromForm(tournamentId) {
   const refDate = startDateVal || endDateVal;
   let correctSeasonId = null; // set only if a mismatch AND a valid target season exist
   let mismatchInfo = null;
+  if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] refDate=${refDate} State.currentSeasonId=${State.currentSeasonId}`);
   if (refDate) {
     const correctStartYear = getSeasonFromDate(refDate);
     const currentSeason = await DB.get('seasons', State.currentSeasonId);
+    if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] correctStartYear=${correctStartYear} currentSeason=${JSON.stringify(currentSeason)}`);
     if (currentSeason && correctStartYear !== null && currentSeason.startYear !== correctStartYear) {
       const allSeasons = await DB.getAll('seasons');
+      if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] mismatch detected, allSeasons=${JSON.stringify(allSeasons.map(s=>({id:s.seasonId,startYear:s.startYear,name:s.seasonName})))}`);
       const correctSeason = allSeasons.find(s => s.startYear === correctStartYear);
       if (correctSeason) {
         correctSeasonId = correctSeason.seasonId;
         mismatchInfo = { correctSeasonName: correctSeason.seasonName, currentSeasonName: currentSeason.seasonName };
+        if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] correctSeason found: ${JSON.stringify(correctSeason)}`);
+      } else {
+        if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] NO matching season found for startYear=${correctStartYear}`);
       }
       // If no matching season exists, correctSeasonId stays null and this
       // tournament simply saves under the currently-selected season,
       // silently — there is genuinely nothing else correct to offer.
+    } else {
+      if (typeof gdDebugLog === 'function') gdDebugLog(`[SEASON DEBUG] no mismatch detected (or currentSeason/correctStartYear invalid)`);
     }
   }
 
