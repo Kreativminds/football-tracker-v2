@@ -1405,7 +1405,7 @@ function renderWizardStepAgeGroup() {
 
         <div class="form-group" style="background:#fbf3d9;border:1px solid #d9c26b;border-radius:6px;padding:12px">
           <label style="font-weight:700">${I18n.t('set_lbl_age_group')}</label>
-          <input id="wiz-agegroup" type="text" value="${esc(prev.ageGroup||'')}" placeholder="e.g. U14">
+          ${renderAgeGroupField('wiz-agegroup', 'wiz-agegroup-other', prev.ageGroup||'')}
         </div>
 
         <div class="form-actions" style="margin-top:16px">
@@ -1418,7 +1418,7 @@ function renderWizardStepAgeGroup() {
 }
 
 function wizardConfirmAgeGroup() {
-  _seasonWizardState.draftSeason.ageGroup = document.getElementById('wiz-agegroup')?.value.trim() || null;
+  _seasonWizardState.draftSeason.ageGroup = readAgeGroupField('wiz-agegroup', 'wiz-agegroup-other');
   renderWizardStepGroundDuration();
 }
 
@@ -1692,7 +1692,7 @@ async function wizardCreateSeason() {
 // local-only and excluded from sync (see SYNC_STORES_SET), so an
 // incomplete setup draft can never leak to the cloud or a second device
 // half-finished.
-const FIRST_TIME_WIZARD_STEPS = 7;
+const FIRST_TIME_WIZARD_STEPS = 8;
 let _firstTimeWizardState = null;
 
 async function saveFirstTimeWizardDraft() {
@@ -1722,7 +1722,7 @@ async function shouldTriggerFirstTimeWizard() {
 
 async function openFirstTimeWizard() {
   const draft = await loadFirstTimeWizardDraft();
-  _firstTimeWizardState = draft || { step: 1, club: {}, season: {}, squad: { mode: null, players: [] } };
+  _firstTimeWizardState = draft || { step: 1, club: {}, season: {}, squad: { mode: null, players: [] }, opponentsMode: null, opponents: [] };
   renderFirstTimeWizardStep();
 }
 
@@ -1759,9 +1759,10 @@ function renderFirstTimeWizardStep() {
   if (step === 2) return renderFTWStepClub();
   if (step === 3) return renderFTWStepSeason();
   if (step === 4) return renderFTWStepSquad();
-  if (step === 5) return renderFTWStepResources();
-  if (step === 6) return renderFTWStepReview();
-  if (step === 7) return renderFTWStepComplete();
+  if (step === 5) return renderFTWStepOpponents();
+  if (step === 6) return renderFTWStepResources();
+  if (step === 7) return renderFTWStepReview();
+  if (step === 8) return renderFTWStepComplete();
 }
 
 // ── STEP 1 — WELCOME ─────────────────────────────────────────────────────
@@ -1804,7 +1805,7 @@ function renderFTWStepClub() {
         </div>
         <div class="form-group">
           <label>${I18n.t('set_lbl_age_group')}</label>
-          <input id="ftw-club-category" type="text" placeholder="e.g. U14" value="${esc(c.category||'')}">
+          ${renderAgeGroupField('ftw-club-category', 'ftw-club-category-other', c.category||'')}
         </div>
         <div class="form-group">
           <label>${I18n.t('ftw_lbl_logo_url')}</label>
@@ -1832,7 +1833,7 @@ async function ftwConfirmClub() {
   if (!name) { Toast.error(I18n.t('wiz_err_club_name_required')); return; }
   _firstTimeWizardState.club = {
     name,
-    category: document.getElementById('ftw-club-category')?.value.trim() || null,
+    category: readAgeGroupField('ftw-club-category', 'ftw-club-category-other'),
     logoUrl: document.getElementById('ftw-club-logo')?.value.trim() || null,
     homeGround: document.getElementById('ftw-club-ground')?.value.trim() || null,
     shirtColor: document.getElementById('ftw-club-shirt')?.value || '#B23333',
@@ -1861,7 +1862,7 @@ function renderFTWStepSeason() {
         </div>
         <div class="form-group">
           <label>${I18n.t('set_lbl_age_group')}</label>
-          <input id="ftw-season-age" type="text" placeholder="e.g. U14" value="${esc(s.ageGroup || _firstTimeWizardState.club.category || '')}">
+          ${renderAgeGroupField('ftw-season-age', 'ftw-season-age-other', s.ageGroup || _firstTimeWizardState.club.category || '')}
         </div>
         <div class="form-group">
           <label>${I18n.t('set_lbl_match_duration')}</label>
@@ -1892,7 +1893,7 @@ async function ftwConfirmSeason() {
   _firstTimeWizardState.season = {
     startYear,
     seasonName: buildSeasonName(startYear),
-    ageGroup: document.getElementById('ftw-season-age')?.value.trim() || null,
+    ageGroup: readAgeGroupField('ftw-season-age', 'ftw-season-age-other'),
     defaultMatchDurationMins: parseInt(document.getElementById('ftw-season-duration')?.value) || null,
   };
   await ftwGoToStep(4);
@@ -1924,13 +1925,34 @@ function renderFTWStepSquad() {
         </div>
         <div class="form-group"><label>${I18n.t('pf_lbl_name')}</label><input id="ftw-player-name" type="text"></div>
         <div class="form-group"><label>${I18n.t('pf_lbl_shirt_num')}</label><input id="ftw-player-num" type="number" min="1" max="99"></div>
-        <div class="form-group"><label>${I18n.t('set_lbl_age_group').includes('Position')?'':I18n.t('pf_lbl_position')}</label>
+        <div class="form-group"><label>${I18n.t('pf_lbl_position')}</label>
           <select id="ftw-player-pos"><option value="">—</option><option>GK</option><option>DF</option><option>MF</option><option>FW</option></select>
         </div>
         <div class="form-group"><label>${I18n.t('pf_lbl_dob')}</label><input id="ftw-player-dob" type="date"></div>
         <button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:14px" onclick="ftwAddManualPlayer()">+ ${I18n.t('ftw_btn_add_player')}</button>
         ` : squad.mode === 'import' ? `
-        <p style="font-size:13px;color:var(--muted);margin-bottom:14px">${I18n.t('ftw_import_note')}</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:10px">${I18n.t('ftw_import_players_hint')}</p>
+        <div class="form-group">
+          <label>${I18n.t('imp_lbl_upload_csv')}</label>
+          <input type="file" accept=".csv" id="ftw-import-players-file" onchange="ftwHandleImportFile(this,'players')">
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin:10px 0">${I18n.t('wiz_or')}</div>
+        <div class="form-group">
+          <label>${I18n.t('imp_lbl_paste_csv')}</label>
+          <textarea id="ftw-paste-players-csv" rows="4" placeholder="fullName,shirtNumber,position,dateOfBirth"></textarea>
+          <button type="button" class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="ftwHandlePasteImport('players')">${I18n.t('imp_btn_parse_paste')}</button>
+        </div>
+        <div id="ftw-import-players-preview" style="margin-top:12px"></div>
+        ${squad.players.length ? `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px">${I18n.t('ftw_import_ready_count', {n: squad.players.length})}</div>
+          <div style="max-height:160px;overflow-y:auto">
+            ${squad.players.map((p,i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+              <span>${esc(p.fullName)}</span>
+              <button class="btn btn-danger btn-sm" onclick="ftwRemoveManualPlayer(${i})">${I18n.t('common_delete')}</button>
+            </div>`).join('')}
+          </div>
+        </div>` : ''}
         ` : `
         <p style="font-size:13px;color:var(--muted);margin-bottom:14px">${I18n.t('ftw_empty_squad_note')}</p>
         `}
@@ -1941,6 +1963,94 @@ function renderFTWStepSquad() {
         </div>
       </div>
     </div>`;
+}
+
+// ── WIZARD-CONTEXT IMPORT WRAPPERS ───────────────────────────────────────────
+// These reuse the EXACT existing parseCSVText + validateImportPlayers /
+// validateImportOpponents functions — no parsing or validation logic is
+// duplicated. The only real wrapper needed: validateImportPlayers reads
+// State.currentSeasonId directly (to check duplicates and stamp new
+// records), which genuinely does not exist yet during First-Time Setup,
+// since creating the season is the wizard's own job. Solved by
+// temporarily setting a placeholder seasonId for the duration of this
+// preview call only, then correctly overwriting every previewed record's
+// seasonId with the REAL season id at final creation time in
+// ftwFinalizeSetup — never writing anything permanent before then.
+async function ftwRunImportPreview(rows, type) {
+  const realSeasonId = State.currentSeasonId;
+  const usingPlaceholder = !realSeasonId;
+  if (usingPlaceholder) State.currentSeasonId = -1; // placeholder, never actually written to any store
+
+  let validated = [];
+  if (type === 'players') validated = await validateImportPlayers(rows);
+  else if (type === 'opponents') validated = validateImportOpponents(rows);
+
+  if (usingPlaceholder) State.currentSeasonId = realSeasonId; // restore immediately, no other code observes the placeholder
+  return validated;
+}
+
+function ftwHandleImportFile(input, type) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'csv') { Toast.error(I18n.t('imp_csv_only')); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onerror = function() { Toast.error(I18n.t('bk_err_read_file')); input.value=''; };
+  reader.onload = async function(e) {
+    const rows = parseCSVText(e.target.result);
+    input.value = '';
+    await ftwProcessImportRows(rows, type);
+  };
+  reader.readAsText(file);
+}
+
+function ftwHandlePasteImport(type) {
+  const id = type === 'players' ? 'ftw-paste-players-csv' : 'ftw-paste-opponents-csv';
+  const text = document.getElementById(id)?.value || '';
+  if (!text.trim()) { Toast.error(I18n.t('bk_err_nothing_pasted')); return; }
+  const rows = parseCSVText(text);
+  ftwProcessImportRows(rows, type);
+}
+
+async function ftwProcessImportRows(rows, type) {
+  if (!rows.length) { Toast.error(I18n.t('imp_no_rows')); return; }
+  const validated = await ftwRunImportPreview(rows, type);
+  const previewId = type === 'players' ? 'ftw-import-players-preview' : 'ftw-import-opponents-preview';
+  const el = document.getElementById(previewId);
+  if (!el) return;
+
+  const ok = validated.filter(r=>r.status==='ok').length;
+  const warn = validated.filter(r=>r.status==='warn').length;
+  const skip = validated.filter(r=>r.status==='skip').length;
+  const err = validated.filter(r=>r.status==='err').length;
+
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <span class="badge-ok">${ok} ${I18n.t('imp_badge_ready')}</span>
+      ${warn?`<span class="badge-warn">${warn} ${I18n.t('imp_badge_flagged')}</span>`:''}
+      ${skip?`<span class="badge-skip">${skip} ${I18n.t('imp_badge_skipped')}</span>`:''}
+      ${err?`<span class="badge-err">${err} ${I18n.t('imp_badge_errors')}</span>`:''}
+    </div>
+    ${(ok+warn) ? `<button class="btn btn-primary btn-sm" style="width:100%" onclick="ftwAddImportedRows('${type}')">${I18n.t('ftw_btn_add_to_wizard', {n: ok+warn})}</button>` : ''}
+  `;
+  // Stash the validated rows temporarily so the "Add" button can pull
+  // their .data without re-validating or re-parsing.
+  window['_ftwValidated_' + type] = validated;
+}
+
+function ftwAddImportedRows(type) {
+  const validated = window['_ftwValidated_' + type] || [];
+  const usable = validated.filter(r => r.status === 'ok' || r.status === 'warn').map(r => r.data);
+  if (type === 'players') {
+    _firstTimeWizardState.squad.players.push(...usable.map(d => ({
+      fullName: d.fullName, shirtNumber: d.shirtNumber, primaryPosition: d.primaryPosition, dateOfBirth: d.dateOfBirth,
+    })));
+  } else if (type === 'opponents') {
+    _firstTimeWizardState.opponents.push(...usable);
+  }
+  window['_ftwValidated_' + type] = null;
+  Toast.show(I18n.t('ftw_import_added', {n: usable.length}));
+  if (type === 'players') renderFTWStepSquad(); else renderFTWStepOpponents();
 }
 
 function ftwSetSquadMode(mode) {
@@ -1969,6 +2079,79 @@ async function ftwConfirmSquad() {
   await ftwGoToStep(5);
 }
 
+// ── STEP 5 — OPPONENTS (optional) ────────────────────────────────────────
+function renderFTWStepOpponents() {
+  const el = document.getElementById('firstTimeWizardOverlay');
+  if (!el) return;
+  const opp = _firstTimeWizardState.opponents;
+  const mode = _firstTimeWizardState.opponentsMode;
+  el.innerHTML = `
+    <div class="rm-form-overlay open">
+      <div class="rm-form" style="max-width:460px">
+        ${firstTimeWizardProgressHtml(5, I18n.t('ftw_step_opponents_label'))}
+        <h3 style="margin-bottom:6px">${I18n.t('ftw_step_opponents_title')}</h3>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">${I18n.t('ftw_step_opponents_body')}</p>
+
+        ${!mode ? `
+        <div class="btn-group" style="flex-direction:column;gap:8px">
+          <button class="btn btn-primary" onclick="ftwSetOpponentsMode('import')">${I18n.t('ftw_btn_import_opponents')}</button>
+          <button class="btn btn-secondary" onclick="ftwSetOpponentsMode('manual')">${I18n.t('ftw_btn_add_opponent_manually')}</button>
+          <button class="btn btn-secondary" onclick="ftwGoToStep(6)">${I18n.t('ftw_btn_skip_for_now')}</button>
+        </div>
+        ` : mode === 'import' ? `
+        <div class="form-group">
+          <label>${I18n.t('imp_lbl_upload_csv')}</label>
+          <input type="file" accept=".csv" id="ftw-import-opponents-file" onchange="ftwHandleImportFile(this,'opponents')">
+        </div>
+        <div style="text-align:center;font-size:11px;color:var(--muted);margin:10px 0">${I18n.t('wiz_or')}</div>
+        <div class="form-group">
+          <label>${I18n.t('imp_lbl_paste_csv')}</label>
+          <textarea id="ftw-paste-opponents-csv" rows="4" placeholder="opponentName,ageGroup,level"></textarea>
+          <button type="button" class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="ftwHandlePasteImport('opponents')">${I18n.t('imp_btn_parse_paste')}</button>
+        </div>
+        <div id="ftw-import-opponents-preview" style="margin-top:12px"></div>
+        ` : `
+        <div class="form-group"><label>${I18n.t('opp_lbl_name')}</label><input id="ftw-opponent-name" type="text"></div>
+        <button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:14px" onclick="ftwAddManualOpponent()">+ ${I18n.t('ftw_btn_add_opponent')}</button>
+        `}
+
+        ${opp.length ? `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px">${I18n.t('ftw_opponents_ready_count', {n: opp.length})}</div>
+          <div style="max-height:160px;overflow-y:auto">
+            ${opp.map((o,i) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:13px">
+              <span>${esc(o.opponentName)}</span>
+              <button class="btn btn-danger btn-sm" onclick="ftwRemoveOpponent(${i})">${I18n.t('common_delete')}</button>
+            </div>`).join('')}
+          </div>
+        </div>` : ''}
+
+        <div class="form-actions" style="margin-top:16px">
+          <button class="btn btn-primary" onclick="ftwGoToStep(6)">${I18n.t('wiz_btn_next')}</button>
+          <button class="btn btn-secondary" onclick="ftwGoToStep(4)">${I18n.t('wiz_btn_back')}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function ftwSetOpponentsMode(mode) {
+  _firstTimeWizardState.opponentsMode = mode;
+  renderFTWStepOpponents();
+}
+
+function ftwAddManualOpponent() {
+  const name = document.getElementById('ftw-opponent-name')?.value.trim();
+  if (!name) { Toast.error(I18n.t('opp_err_name_required')); return; }
+  _firstTimeWizardState.opponents.push({ opponentName: name, ageGroup: null, level: null, notes: null });
+  document.getElementById('ftw-opponent-name').value = '';
+  renderFTWStepOpponents();
+}
+
+function ftwRemoveOpponent(index) {
+  _firstTimeWizardState.opponents.splice(index, 1);
+  renderFTWStepOpponents();
+}
+
 // ── STEP 5 — OPTIONAL RESOURCES ──────────────────────────────────────────
 // Lightweight and self-contained — the full Season Resources feature
 // referenced in the spec does not exist in this codebase (confirmed by
@@ -1988,15 +2171,15 @@ function renderFTWStepResources() {
   el.innerHTML = `
     <div class="rm-form-overlay open">
       <div class="rm-form" style="max-width:440px;text-align:center">
-        ${firstTimeWizardProgressHtml(5, I18n.t('ftw_step_resources_label'))}
+        ${firstTimeWizardProgressHtml(6, I18n.t('ftw_step_resources_label'))}
         <div style="font-size:32px;margin:6px 0">&#128279;</div>
         <h3 style="margin-bottom:10px">${I18n.t('ftw_step_resources_title')}</h3>
         <p style="font-size:14px;color:var(--muted);margin-bottom:20px">${I18n.t('ftw_resources_placeholder_body')}</p>
 
         <div class="form-actions" style="margin-top:16px">
-          <button class="btn btn-primary" onclick="ftwGoToStep(6)">${I18n.t('wiz_btn_continue')}</button>
-          <button class="btn btn-secondary" onclick="ftwGoToStep(6)">${I18n.t('ftw_btn_skip')}</button>
-          <button class="btn btn-secondary" onclick="ftwGoToStep(4)">${I18n.t('wiz_btn_back')}</button>
+          <button class="btn btn-primary" onclick="ftwGoToStep(7)">${I18n.t('wiz_btn_continue')}</button>
+          <button class="btn btn-secondary" onclick="ftwGoToStep(7)">${I18n.t('ftw_btn_skip')}</button>
+          <button class="btn btn-secondary" onclick="ftwGoToStep(5)">${I18n.t('wiz_btn_back')}</button>
         </div>
       </div>
     </div>`;
@@ -2010,7 +2193,7 @@ function renderFTWStepReview() {
   el.innerHTML = `
     <div class="rm-form-overlay open">
       <div class="rm-form" style="max-width:460px">
-        ${firstTimeWizardProgressHtml(6, I18n.t('ftw_step_review_label'))}
+        ${firstTimeWizardProgressHtml(7, I18n.t('ftw_step_review_label'))}
         <h3 style="margin-bottom:12px">${I18n.t('wiz_step_review_title')}</h3>
 
         <div class="card" style="background:var(--bg);margin-bottom:10px">
@@ -2027,10 +2210,15 @@ function renderFTWStepReview() {
           <div class="card-title">${I18n.t('ftw_step_squad_label')}</div>
           <div style="font-weight:700">${I18n.t('wiz_review_players_count', {n: s.squad.players.length})}</div>
         </div>
+        ${s.opponents.length ? `
+        <div class="card" style="background:var(--bg);margin-bottom:10px">
+          <div class="card-title">${I18n.t('ftw_step_opponents_label')}</div>
+          <div style="font-weight:700">${s.opponents.length}</div>
+        </div>` : ''}
 
         <div class="form-actions" style="margin-top:16px">
           <button class="btn btn-primary" onclick="ftwFinalizeSetup()">${I18n.t('ftw_btn_finish_setup')}</button>
-          <button class="btn btn-secondary" onclick="ftwGoToStep(5)">${I18n.t('wiz_btn_back')}</button>
+          <button class="btn btn-secondary" onclick="ftwGoToStep(6)">${I18n.t('wiz_btn_back')}</button>
         </div>
       </div>
     </div>`;
@@ -2041,6 +2229,7 @@ async function ftwFinalizeSetup() {
   const s = _firstTimeWizardState;
   let clubTeamId = null, seasonId = null;
   const createdPlayerIds = [];
+  const createdOpponentIds = [];
 
   try {
     await Backup.create('before-save');
@@ -2078,7 +2267,25 @@ async function ftwFinalizeSetup() {
       createdPlayerIds.push(newPlayerId);
     }
 
-    // Step 5 (Optional Resources) is a placeholder only — it collects
+    // Opponents are a shared, season-independent catalogue (confirmed:
+    // the opponents store has no seasonId field at all) — same dedup
+    // rule as the real Opponents import (confirmImport), never creating
+    // a second entry for a name that already exists in the catalogue.
+    if (s.opponents.length) {
+      const existingOpponentNames = (await DB.getAll('opponents')).map(o => (o.opponentName||'').toLowerCase());
+      for (const o of s.opponents) {
+        if (existingOpponentNames.includes((o.opponentName||'').toLowerCase())) continue;
+        const newOpponentId = await DB.put('opponents', {
+          opponentName: o.opponentName,
+          ageGroup: o.ageGroup || null,
+          level: o.level || null,
+          notes: o.notes || null,
+        });
+        createdOpponentIds.push(newOpponentId);
+      }
+    }
+
+    // Step 6 (Optional Resources) is a placeholder only — it collects
     // nothing and creates nothing. No achievement records, no other
     // records of any kind are created for it. See renderFTWStepResources.
 
@@ -2094,6 +2301,7 @@ async function ftwFinalizeSetup() {
     console.error('[ftwFinalizeSetup] failed, rolling back:', err);
     try {
       for (const pid of createdPlayerIds) await DB.del('players', pid);
+      for (const oid of createdOpponentIds) await DB.del('opponents', oid);
       if (seasonId) await DB.del('seasons', seasonId);
       if (clubTeamId) await DB.del('clubTeams', clubTeamId);
     } catch (rollbackErr) {
@@ -2220,6 +2428,35 @@ async function renderGettingStartedCard() {
         <span style="${i.done?'color:var(--muted);text-decoration:line-through':''}">${esc(i.label)}</span>
       </div>`).join('')}
     </div>`;
+}
+
+// ── SHARED AGE GROUP LIST ────────────────────────────────────────────────────
+// One canonical list, reused by every Age Group field in the app (both
+// wizards, the plain Create/Edit Season forms) — previously each was a
+// free-text input, risking typos and inconsistent values across seasons.
+const AGE_GROUP_OPTIONS = ['U6','U7','U8','U9','U10','U11','U12','U13','U14','U15','U16','U17','U18','U19','U23','Senior','Other'];
+
+// Renders the shared dropdown + a conditional "Other" text field. Pass
+// the currently-selected value (a real option, 'Other', or any legacy
+// free-text value already stored on old records) and unique element IDs
+// for the select and the custom-text input.
+function renderAgeGroupField(selectId, customId, currentValue) {
+  const isKnownOption = AGE_GROUP_OPTIONS.includes(currentValue);
+  const isOtherWithText = currentValue && !isKnownOption; // legacy free-text value
+  return `
+    <select id="${selectId}" onchange="document.getElementById('${customId}').style.display=this.value==='Other'?'block':'none'">
+      <option value="">—</option>
+      ${AGE_GROUP_OPTIONS.map(o => `<option value="${o}" ${(currentValue===o || (isOtherWithText && o==='Other'))?'selected':''}>${o}</option>`).join('')}
+    </select>
+    <input id="${customId}" type="text" placeholder="e.g. Veterans" value="${esc(isOtherWithText ? currentValue : '')}" style="display:${isOtherWithText?'block':'none'};margin-top:6px">`;
+}
+
+// Reads back the actual value from a renderAgeGroupField pair — either
+// the selected option, or the custom text if "Other" was chosen.
+function readAgeGroupField(selectId, customId) {
+  const sel = document.getElementById(selectId)?.value || '';
+  if (sel === 'Other') return document.getElementById(customId)?.value.trim() || null;
+  return sel || null;
 }
 
 async function migrateCareerPlayerIds() {
@@ -2966,6 +3203,63 @@ function _navAccountMenuOutsideClick(e) {
 }
 
 // ── OPPONENTS CATALOGUE — SETTINGS TAB ───────────────────────────────────────
+// ── OPPONENTS PAGE — INLINE IMPORT ───────────────────────────────────────────
+// Reuses the exact real parseCSVText / validateImportOpponents /
+// confirmImport functions already built for the Settings Import tab — no
+// parsing or validation logic is duplicated here. Only wraps them to
+// render into this page's own preview element, since the shared hidden
+// file input's own change handler always targets the original Import
+// tab's preview div, not this one.
+function toggleOpponentsImportSection() {
+  const section = document.getElementById('oppImportSection');
+  const chevron = document.getElementById('oppImportChevron');
+  if (!section) return;
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : 'block';
+  if (chevron) chevron.innerHTML = isOpen ? '&#9660;' : '&#9650;';
+}
+
+function handleOppPageImportFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext !== 'csv') { Toast.error(I18n.t('imp_csv_only')); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onerror = function() { Toast.error(I18n.t('bk_err_read_file')); input.value=''; };
+  reader.onload = function(e) {
+    const rows = parseCSVText(e.target.result);
+    input.value = '';
+    renderOppPageImportPreview(validateImportOpponents(rows));
+  };
+  reader.readAsText(file);
+}
+
+function handlePasteImportFromOppPage() {
+  const text = document.getElementById('pasteOpponentsCSVOppPage')?.value || '';
+  if (!text.trim()) { Toast.error(I18n.t('bk_err_nothing_pasted')); return; }
+  const rows = parseCSVText(text);
+  renderOppPageImportPreview(validateImportOpponents(rows));
+}
+
+function renderOppPageImportPreview(validated) {
+  window._importData_opponents = validated; // confirmImport reads this exact global, same as the real Import tab
+  const el = document.getElementById('importOpponentsPreviewOppPage');
+  if (!el) return;
+  const ok = validated.filter(r=>r.status==='ok').length;
+  const err = validated.filter(r=>r.status==='err').length;
+  el.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="badge-ok">${ok} ${I18n.t('imp_badge_ready')}</span>
+      ${err?`<span class="badge-err">${err} ${I18n.t('imp_badge_errors')}</span>`:''}
+      ${ok?`<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="confirmImportFromOppPage()">${I18n.t('imp_btn_import_n', {n: ok})}</button>`:''}
+    </div>`;
+}
+
+async function confirmImportFromOppPage() {
+  await confirmImport('opponents', window._importData_opponents);
+  await renderOpponentsTab();
+}
+
 async function renderOpponentsTab() {
   const el = document.getElementById('stab-panel-opponents');
   if (!el) return;
@@ -2976,6 +3270,26 @@ async function renderOpponentsTab() {
     <div class="settings-section">
       <h3>${I18n.t('opp_catalogue_title')}</h3>
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('opp_catalogue_desc')}</p>
+
+      <div class="card" style="margin-bottom:16px;background:var(--bg)">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleOpponentsImportSection()">
+          <div class="card-title" style="margin-bottom:0">${I18n.t('opp_import_title')}</div>
+          <span id="oppImportChevron">&#9660;</span>
+        </div>
+        <div id="oppImportSection" style="display:none;margin-top:12px">
+          <div class="form-group">
+            <label>${I18n.t('imp_lbl_upload_csv')}</label>
+            <input type="file" accept=".csv" id="oppPageImportFile" onchange="handleOppPageImportFile(this)">
+          </div>
+          <div style="text-align:center;font-size:11px;color:var(--muted);margin:10px 0">${I18n.t('wiz_or')}</div>
+          <div class="form-group">
+            <label>${I18n.t('imp_lbl_paste_csv')}</label>
+            <textarea id="pasteOpponentsCSVOppPage" rows="4" placeholder="opponentName,ageGroup,level"></textarea>
+            <button type="button" class="btn btn-secondary btn-sm" style="margin-top:6px" onclick="handlePasteImportFromOppPage()">${I18n.t('imp_btn_parse_paste')}</button>
+          </div>
+          <div id="importOpponentsPreviewOppPage" style="margin-top:12px"></div>
+        </div>
+      </div>
 
       <div class="form-panel" style="margin-bottom:16px">
         <h3>${I18n.t('opp_form_add_title')}</h3>
@@ -3780,7 +4094,19 @@ const TR = {
     ftw_btn_add_manually:'Add Players Manually', ftw_btn_import_players:'Import Players',
     ftw_btn_add_player:'Add Player', ftw_import_note:'Go to Settings → Import once setup is complete to bring in players from a CSV file.',
     ftw_empty_squad_note:'You can add players any time from the Squad page.',
+    imp_lbl_upload_csv:'Upload CSV File', imp_lbl_paste_csv:'Or Paste CSV Text', imp_btn_parse_paste:'Parse Pasted Text',
+    imp_badge_ready:'ready', imp_badge_flagged:'flagged', imp_badge_skipped:'skipped', imp_badge_errors:'errors',
+    imp_btn_import_n:'Import {n} rows', opp_import_title:'Import Opponents from CSV',
+    ftw_step_opponents_label:'Opponents', ftw_step_opponents_title:'Add Opponents (Optional)',
+
+    ftw_step_opponents_body:'Add the teams you\'ll be playing against this season. Fully optional — skip if you\'d rather do this later.',
+    ftw_btn_import_opponents:'Import Opponents', ftw_btn_add_opponent_manually:'Add Opponent Manually', ftw_btn_skip_for_now:'Skip for Now',
+    ftw_btn_add_opponent:'Add Opponent', ftw_opponents_ready_count:'{n} opponent(s) ready',
+    ftw_import_players_hint:'Upload a CSV file or paste CSV text below.',
+    ftw_import_ready_count:'{n} player(s) ready', ftw_btn_add_to_wizard:'Add {n} to Squad',
+    ftw_import_added:'{n} added.',
     ftw_step_resources_label:'Resources', ftw_step_resources_title:'Optional Resources',
+
     ftw_resources_placeholder_body:'Resources can be added later from the Season page.',
     ftw_btn_skip:'Skip',
     ftw_step_review_label:'Review', ftw_btn_finish_setup:'Finish Setup',
@@ -4840,7 +5166,19 @@ const TR = {
     ftw_btn_add_manually:'Adicionar Jogadores Manualmente', ftw_btn_import_players:'Importar Jogadores',
     ftw_btn_add_player:'Adicionar Jogador', ftw_import_note:'Vá a Definições → Importar assim que a configuração estiver concluída para trazer jogadores de um ficheiro CSV.',
     ftw_empty_squad_note:'Pode adicionar jogadores a qualquer momento a partir da página do Plantel.',
+    imp_lbl_upload_csv:'Carregar Ficheiro CSV', imp_lbl_paste_csv:'Ou Cole o Texto CSV', imp_btn_parse_paste:'Processar Texto Colado',
+    imp_badge_ready:'pronto(s)', imp_badge_flagged:'assinalado(s)', imp_badge_skipped:'ignorado(s)', imp_badge_errors:'erro(s)',
+    imp_btn_import_n:'Importar {n} linhas', opp_import_title:'Importar Adversários de CSV',
+    ftw_step_opponents_label:'Adversários', ftw_step_opponents_title:'Adicionar Adversários (Opcional)',
+
+    ftw_step_opponents_body:'Adicione as equipas contra as quais vai jogar esta época. Totalmente opcional — pode saltar e fazer isto mais tarde.',
+    ftw_btn_import_opponents:'Importar Adversários', ftw_btn_add_opponent_manually:'Adicionar Adversário Manualmente', ftw_btn_skip_for_now:'Saltar por Agora',
+    ftw_btn_add_opponent:'Adicionar Adversário', ftw_opponents_ready_count:'{n} adversário(s) pronto(s)',
+    ftw_import_players_hint:'Carregue um ficheiro CSV ou cole o texto CSV abaixo.',
+    ftw_import_ready_count:'{n} jogador(es) pronto(s)', ftw_btn_add_to_wizard:'Adicionar {n} ao Plantel',
+    ftw_import_added:'{n} adicionado(s).',
     ftw_step_resources_label:'Recursos', ftw_step_resources_title:'Recursos Opcionais',
+
     ftw_resources_placeholder_body:'Os recursos podem ser adicionados mais tarde a partir da página da Época.',
     ftw_btn_skip:'Saltar',
     ftw_step_review_label:'Rever', ftw_btn_finish_setup:'Concluir Configuração',
@@ -11361,7 +11699,7 @@ const Render = (() => {
       if (existingDraft) {
         _firstTimeWizardState = existingDraft;
       } else {
-        _firstTimeWizardState = { step: 1, club: {}, season: {}, squad: { mode: null, players: [] } };
+        _firstTimeWizardState = { step: 1, club: {}, season: {}, squad: { mode: null, players: [] }, opponentsMode: null, opponents: [] };
       }
       renderFirstTimeWizardStep();
     }
@@ -12347,6 +12685,7 @@ const Render = (() => {
           <p style="font-size:12px;color:var(--muted);margin-bottom:10px">${I18n.t('wiz_entry_hint')}</p>
           <button class="btn btn-primary" onclick="openSeasonWizard()">${I18n.t('wiz_entry_btn')}</button>
         </div>` : ''}
+        ${!seasons.length ? `
         <div class="form-panel" style="margin-bottom:12px">
           <h3>${I18n.t('set_create_season')}</h3>
           <div class="form-grid">
@@ -12357,7 +12696,7 @@ const Render = (() => {
             </div>
             <div class="form-group"><label>${I18n.t('set_lbl_club_name')}</label><input id="sf-club" type="text" placeholder="e.g. SL Olivais"></div>
             <div class="form-group"><label>${I18n.t('set_lbl_home_ground')}</label><input id="sf-homeground" type="text" placeholder="e.g. Campo SL Olivais"></div>
-            <div class="form-group"><label>${I18n.t('set_lbl_age_group')}</label><input id="sf-age" type="text" placeholder="e.g. U12"></div>
+            <div class="form-group"><label>${I18n.t('set_lbl_age_group')}</label>${renderAgeGroupField('sf-age', 'sf-age-other', '')}</div>
             <div class="form-group"><label>${I18n.t('set_lbl_match_duration')}</label>
               <select id="sf-duration-select" onchange="toggleSeasonDurationCustom()">
                 <option value="">${I18n.t('duration_default_90')}</option>
@@ -12381,7 +12720,7 @@ const Render = (() => {
           <div class="form-actions">
             <button class="btn btn-primary" id="btnCreateSeason">${I18n.t('set_btn_create_season')}</button>
           </div>
-        </div>
+        </div>` : ''}
 
         <!-- SEASON RENEWAL WIZARD overlay target -->
         <div id="seasonWizardOverlay" style="display:none"></div>
@@ -12405,7 +12744,7 @@ const Render = (() => {
             </div>
             <div class="form-group"><label>${I18n.t('set_lbl_club_name')}</label><input id="sf-edit-club" type="text" placeholder="e.g. SL Olivais" value="${esc(State.currentSeason?.clubName||'')}"></div>
             <div class="form-group"><label>Home Ground</label><input id="sf-edit-homeground" type="text" placeholder="e.g. Campo SL Olivais" value="${esc(State.currentSeason?.homeGround||'')}"></div>
-            <div class="form-group"><label>Age Group</label><input id="sf-edit-age" type="text" placeholder="e.g. U12" value="${esc(State.currentSeason?.ageGroup||'')}"></div>
+            <div class="form-group"><label>Age Group</label>${renderAgeGroupField('sf-edit-age', 'sf-edit-age-other', State.currentSeason?.ageGroup||'')}</div>
             <div class="form-group"><label>${I18n.t('set_lbl_shirt_color')} <span style="font-size:10px;font-weight:400;color:#999">${I18n.t('set_shirt_color_hint')}</span></label>
               <div style="display:flex;gap:6px;align-items:center">
                 <input id="sf-edit-shirtcolor" type="color" value="${esc(State.currentSeason?.shirtColor||'#B23333')}" style="width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:4px">
@@ -15637,7 +15976,7 @@ document.addEventListener('click', async e => {
       startYear,
       clubName: document.getElementById('sf-club')?.value.trim()||null,
       homeGround: document.getElementById('sf-homeground')?.value.trim()||null,
-      ageGroup: document.getElementById('sf-age')?.value.trim()||null,
+      ageGroup: readAgeGroupField('sf-age', 'sf-age-other'),
       defaultMatchDurationMins: readDurationFromForm('sf-duration-select', 'sf-duration-custom'),
       shirtColor: (shirtColorInput && shirtColorInput.value !== '#b23333' && shirtColorInput.value !== '#B23333') ? shirtColorInput.value : null,
       notes: document.getElementById('sf-notes')?.value.trim()||null,
@@ -15681,7 +16020,7 @@ document.addEventListener('click', async e => {
       seasonName: buildSeasonName(newStartYear),
       clubName:   document.getElementById('sf-edit-club')?.value.trim()||null,
       homeGround: document.getElementById('sf-edit-homeground')?.value.trim()||null,
-      ageGroup:   document.getElementById('sf-edit-age')?.value.trim()||null,
+      ageGroup:   readAgeGroupField('sf-edit-age', 'sf-edit-age-other'),
       shirtColor: (editShirtVal && editShirtVal.toUpperCase() !== '#B23333') ? editShirtVal : null,
     };
     await Backup.create('before-save');
