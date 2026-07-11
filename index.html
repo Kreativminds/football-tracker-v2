@@ -910,7 +910,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
   APP_VERSION: '1.2.0',
-  SCHEMA_VERSION: 13,
+  SCHEMA_VERSION: 14,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
   FULL_GAME_MINS: 80,
@@ -1179,6 +1179,66 @@ const AFL_SUB14_II_DIVISAO_SEED = [
   'Atlético','Belenenses "C"','Benfica SAD "B"','Casa Pia "C"','CIF','Damaiense "B"','EF Belém "C"','Futebol Benfica','Olivais "B"','Santa Maria "C"','Sporting SAD "B"','Unidos',
   'AD Amadora','Belenenses "B"','Bless Academy','Caneças "A"','Casa Pia "B"','CF Estrela "B"','Cultural "A"','Damaiense "A"','EF Belém "A"','EFBO "B"','Tenente Valdez "A"',
 ];
+
+// ── CLUB/TEAM MIGRATION — one-time backfill from Season.clubName ───────────
+// Creates one clubTeam record per distinct club name found across existing
+// seasons, then links every season to the correct one via a new nullable
+// clubTeamId field. seasons.clubName is deliberately NOT removed — it
+// remains as a compatibility fallback for any read path not yet updated,
+// and as the safety net this migration itself needs if it's ever re-run.
+//
+// Idempotent: safe to call multiple times. A season that already has a
+// clubTeamId is left untouched. A clubTeam whose normalized name already
+// exists is reused, never duplicated — same normalization (case, accents,
+// whitespace) used for the club-achievement matching fix, since this is
+// exactly the same "two independent free-text fields must agree" problem.
+async function migrateClubTeams() {
+  const normalize = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+  const allSeasons = await DB.getAll('seasons');
+  const existingClubTeams = await DB.getAll('clubTeams');
+
+  // Map of normalized name -> clubTeamId, seeded from whatever already
+  // exists so a second run never creates duplicates.
+  const clubTeamByNormalizedName = {};
+  existingClubTeams.forEach(ct => {
+    clubTeamByNormalizedName[normalize(ct.name)] = ct.clubTeamId;
+  });
+
+  let created = 0, linked = 0;
+
+  for (const season of allSeasons) {
+    if (season.clubTeamId) continue; // already linked, nothing to do
+    if (!season.clubName || !season.clubName.trim()) continue; // nothing to backfill from
+
+    const norm = normalize(season.clubName);
+    let clubTeamId = clubTeamByNormalizedName[norm];
+
+    if (!clubTeamId) {
+      // Create the clubTeam, carrying over whatever club-related fields
+      // this season happens to have (logo, shirt colour) — later seasons
+      // sharing the same club won't overwrite these once set.
+      clubTeamId = await DB.put('clubTeams', {
+        name: season.clubName.trim(),
+        logoUrl: season.logoUrl || null,
+        shirtColor: season.shirtColor || null,
+        location: season.homeGround || null,
+        createdAt: new Date().toISOString(),
+      });
+      clubTeamByNormalizedName[norm] = clubTeamId;
+      created++;
+    }
+
+    season.clubTeamId = clubTeamId;
+    await DB.put('seasons', season);
+    linked++;
+  }
+
+  if (created || linked) {
+    console.log(`[migrateClubTeams] Created ${created} club/team record(s), linked ${linked} season(s).`);
+  }
+  return { created, linked };
+}
 
 async function seedOpponentsIfEmpty() {
   const existing = await DB.getAll('opponents');
@@ -4438,6 +4498,14 @@ const DB = (() => {
           const tmp = db.createObjectStore('temporaryPlayers', { keyPath: 'tempPlayerId', autoIncrement: true });
           tmp.createIndex('seasonId', 'seasonId', { unique: false });
         }
+        // Club/Team entity — introduced so a season references a real,
+        // reusable club record instead of re-typing the club name on
+        // every renewal. seasons.clubName is kept as a compatibility
+        // fallback (not removed) until every read path has safely moved
+        // to clubTeamId; see migrateClubTeams() for the one-time backfill.
+        if (!db.objectStoreNames.contains('clubTeams')) {
+          db.createObjectStore('clubTeams', { keyPath: 'clubTeamId', autoIncrement: true });
+        }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
       req.onerror = e => reject(e.target.error);
@@ -4543,14 +4611,22 @@ const DB = (() => {
   }
 
   async function getAllFromAllStores() {
-    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats','events','goalEvents','injuries'];
+    // Derived from the same authoritative SYNC_STORES_SET used by sync,
+    // plus appMeta (device-local config, not synced, but still worth
+    // backing up/restoring). Previously this was its own separate,
+    // hardcoded list that had silently fallen out of sync with reality —
+    // missing opponents, tournaments, temporaryPlayers, and all four
+    // training-related stores entirely, meaning Backup/Restore never
+    // actually covered them. Deriving from one shared source means this
+    // can't drift out of sync again the same way.
+    const stores = ['appMeta', ...SYNC_STORES_SET];
     const result = {};
     for (const s of stores) { result[s] = await getAll(s); }
     return result;
   }
 
   async function restoreAllStores(data) {
-    const stores = ['appMeta','seasons','players','games','gamePlayers','achievements','clubHistory','playerGameStats','events','goalEvents','injuries'];
+    const stores = ['appMeta', ...SYNC_STORES_SET];
     for (const s of stores) {
       await clear(s);
       if (data[s]) {
@@ -9998,7 +10074,7 @@ async function handleSyncDownload() {
 // DB PUT WRAPPER — marks records as modified for sync
 // ══════════════════════════════════════════════════════════════════════════════
 const _origPut = DB.put.bind(DB);
-const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats','events','goalEvents','injuries','trainingSessions','customDrills','drillFavourites','trainingPacks','tournaments','temporaryPlayers']);
+const SYNC_STORES_SET = new Set(['seasons','players','games','gamePlayers','achievements','clubHistory','globalPlayers','opponents','playerGameStats','events','goalEvents','injuries','trainingSessions','customDrills','drillFavourites','trainingPacks','tournaments','temporaryPlayers','clubTeams']);
 
 DB.put = async function(store, obj) {
   if (SYNC_STORES_SET.has(store) && obj) {
@@ -11981,6 +12057,7 @@ const Sync = (() => {
       trainingPacks: 'training_packs',
       tournaments: 'tournaments',
       temporaryPlayers: 'temporary_players',
+      clubTeams: 'club_teams',
     };
     return map[store] || store;
   }
@@ -12528,7 +12605,7 @@ const Sync = (() => {
       playerGameStats:'pgsId', events:'eventId', goalEvents:'goalEventId', injuries:'injuryId',
       trainingSessions:'trainingSessionId', customDrills:'drillId', drillFavourites:'favouriteId',
       trainingPacks:'packId',
-      tournaments:'tournamentId', temporaryPlayers:'tempPlayerId',
+      tournaments:'tournamentId', temporaryPlayers:'tempPlayerId', clubTeams:'clubTeamId',
     };
     return keys[store] || 'id';
   }
@@ -14458,6 +14535,7 @@ async function continueAppLoadAfterLogin() {
     // Seed the opponents catalogue once, only if it's genuinely empty —
     // never overwrites or duplicates anything the user has already added.
     try { await seedOpponentsIfEmpty(); } catch(e) { console.error('[init] opponent seed failed:', e); }
+    try { await migrateClubTeams(); } catch(e) { console.error('[init] club/team migration failed:', e); }
 
     // Backup at most once per 24 hours
     const lastBackupMeta = await DB.get('appMeta', 'lastAutoBackupAt');
