@@ -730,13 +730,11 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <button class="import-tab" id="atab-kanban" onclick="switchAdminTab('kanban')">&#9646;&#9646; <span data-i18n="adm_tab_kanban">Kanban</span></button>
       <button class="import-tab" id="atab-fields" onclick="switchAdminTab('fields')">&#128065; <span data-i18n="adm_tab_fields">Field Visibility</span></button>
       <button class="import-tab" id="atab-debug" onclick="switchAdminTab('debug')">&#128027; <span data-i18n="adm_tab_debug">Debug</span></button>
-      <button class="import-tab" id="atab-diagnostics" onclick="switchAdminTab('diagnostics')">&#128269; <span data-i18n="adm_tab_diagnostics">Diagnostics</span></button>
     </div>
     <div id="admin-panel-roadmap"></div>
     <div id="admin-panel-kanban" style="display:none"></div>
     <div id="admin-panel-fields" style="display:none"></div>
     <div id="admin-panel-debug" style="display:none"></div>
-    <div id="admin-panel-diagnostics" style="display:none"></div>
   </div>
 
   <!-- HELP PAGE -->
@@ -4438,7 +4436,8 @@ const TR = {
 
     // ── SETTINGS — TABS ──
     set_tab_seasons:'Seasons', set_tab_import:'Import', set_tab_sync:'Cloud Sync',
-    set_tab_backup:'Backup', set_tab_danger:'Danger Zone', set_tab_sharing:'Sharing', set_tab_tournaments:'Tournaments',
+    set_tab_backup:'Backup', set_tab_danger:'Danger Zone', set_tab_sharing:'Sharing', set_tab_tournaments:'Tournaments', set_tab_diagnostics:'Diagnostics',
+    diag_intro:'Tools to review and correct your own season, club, and player data — for example if a game or tournament ended up in the wrong season.',
     set_tournaments_hint:'Manage your tournaments, Tournament Team, and temporary players from the Games page.', set_tournaments_btn_open:'Open Tournaments',
 
     // ── SETTINGS — SEASONS ──
@@ -5537,7 +5536,8 @@ const TR = {
 
     // ── SETTINGS — TABS ──
     set_tab_seasons:'Épocas', set_tab_import:'Importar', set_tab_sync:'Sincronização',
-    set_tab_backup:'Cópia de Segurança', set_tab_danger:'Zona de Risco', set_tab_sharing:'Partilha', set_tab_tournaments:'Torneios',
+    set_tab_backup:'Cópia de Segurança', set_tab_danger:'Zona de Risco', set_tab_sharing:'Partilha', set_tab_tournaments:'Torneios', set_tab_diagnostics:'Diagnóstico',
+    diag_intro:'Ferramentas para rever e corrigir os seus próprios dados de época, clube e jogadores — por exemplo, se um jogo ou torneio ficou associado à época errada.',
     set_tournaments_hint:'Faça a gestão dos seus torneios, Plantel do Torneio e jogadores temporários a partir da página de Jogos.', set_tournaments_btn_open:'Abrir Torneios',
 
     // ── SETTINGS — SEASONS ──
@@ -7040,7 +7040,7 @@ async function initAdmin() {
 
 // ── Admin tab switching ────────────────────────────────────────────────────────
 function switchAdminTab(tab) {
-  ['roadmap','kanban','fields','debug','diagnostics'].forEach(t => {
+  ['roadmap','kanban','fields','debug'].forEach(t => {
     document.getElementById(`admin-panel-${t}`).style.display = t === tab ? '' : 'none';
     document.getElementById(`atab-${t}`)?.classList.toggle('active-tab', t === tab);
   });
@@ -7048,7 +7048,6 @@ function switchAdminTab(tab) {
   if (tab === 'kanban')  renderKanban();
   if (tab === 'fields')  renderFieldVisibilityTab();
   if (tab === 'debug')   renderDebugTab();
-  if (tab === 'diagnostics') renderDiagnosticsTab();
 }
 
 async function renderDebugTab() {
@@ -7085,12 +7084,6 @@ let _seasonAuditIssues = [];
 let _playerIdentityGroups = [];
 
 async function renderDiagnosticsTab() {
-  const el = document.getElementById('admin-panel-diagnostics');
-  if (!el) return;
-  el.innerHTML = `
-    <div id="identityReviewContainer"></div>
-    <div id="seasonAuditContainer"></div>
-  `;
   await renderIdentityReviewSection();
   await renderSeasonAuditSection();
 }
@@ -13346,6 +13339,7 @@ const Render = (() => {
         <button class="import-tab" id="stab-import" onclick="switchSettingsTab('import')">${I18n.t('set_tab_import')}</button>
         <button class="import-tab" id="stab-sync" onclick="switchSettingsTab('sync')">${I18n.t('set_tab_sync')}</button>
         <button class="import-tab" id="stab-backup" onclick="switchSettingsTab('backup')">${I18n.t('set_tab_backup')}</button>
+        <button class="import-tab" id="stab-diagnostics" onclick="switchSettingsTab('diagnostics')">${I18n.t('set_tab_diagnostics')}</button>
         <button class="import-tab" id="stab-danger" onclick="switchSettingsTab('danger')">${I18n.t('set_tab_danger')}</button>
       </div>
 
@@ -13606,6 +13600,21 @@ const Render = (() => {
         </div>
       </div>
       </div><!-- end stab-panel-backup -->
+
+      <!-- DIAGNOSTICS TAB — relocated from Admin. This tool operates
+           entirely on the current authenticated user's own data (every
+           DB.getAll call here is already scoped to the local IndexedDB,
+           which only ever contains this account's synced records) — it
+           was never actually Admin-specific, and every Parent needs the
+           same ability to find and fix their own mis-assigned seasons. -->
+      <div id="stab-panel-diagnostics" style="display:none">
+        <div class="settings-section">
+          <h3>${I18n.t('set_tab_diagnostics')}</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">${I18n.t('diag_intro')}</p>
+          <div id="identityReviewContainer"></div>
+          <div id="seasonAuditContainer"></div>
+        </div>
+      </div><!-- end stab-panel-diagnostics -->
 
       <!-- SHARING TAB — Share Team content moved here unchanged from its
            previous standalone section; same #shareTeamContent id, same
@@ -17471,7 +17480,7 @@ function updateSeasonEditNamePreview() {
 function switchSettingsTab(tab) {
   State.currentSettingsTab = tab;
   try { sessionStorage.setItem('squadTracker_settingsTab', tab); } catch(e) {}
-  ['seasons','opponents','sharing','tournaments','import','sync','backup','danger'].forEach(t => {
+  ['seasons','opponents','sharing','tournaments','import','sync','backup','diagnostics','danger'].forEach(t => {
     const panel = document.getElementById(`stab-panel-${t}`);
     const btn   = document.getElementById(`stab-${t}`);
     if (panel) panel.style.display = t === tab ? '' : 'none';
@@ -17484,6 +17493,9 @@ function switchSettingsTab(tab) {
   }
   if (tab === 'opponents') {
     renderOpponentsTab();
+  }
+  if (tab === 'diagnostics') {
+    renderDiagnosticsTab();
   }
 }
 
