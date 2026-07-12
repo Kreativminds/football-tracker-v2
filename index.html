@@ -2608,9 +2608,19 @@ function groupDuplicates(records, keyFn) {
 
 async function scanDuplicateGames() {
   const all = (await DB.getAll('games')).filter(g => !g.isDeleted);
+  // Deliberately excludes score from the natural key. A team cannot
+  // legitimately play the same opponent twice, in the same competition,
+  // home/away, on the exact same date — that combination alone is
+  // already a real, sufficient signature for "this is the same match."
+  // Including score in the key (the original version) actively hid the
+  // real problem: two local copies of the same game with a mismatched
+  // or corrupted score were never recognized as duplicates, when a
+  // score DISAGREEMENT between copies of the same match is exactly the
+  // kind of corruption this scan needs to catch, not protect against
+  // detecting.
   return groupDuplicates(all, g => {
     if (!g.date || !g.opponent) return null;
-    return [g.seasonId, g.date, g.opponent, g.competitionType, g.homeAway, g.ownGoalsForUs, g.opponentScore].join('|');
+    return [g.seasonId, g.date, g.opponent, g.competitionType, g.homeAway].join('|');
   });
 }
 
@@ -2728,7 +2738,18 @@ async function pickMasterRecord(group, childCountFn) {
 
 async function repairDuplicateGames(groups, log) {
   for (const group of groups) {
-    const master = await pickMasterRecord(group, async g => (await DB.getAll('gamePlayers','gameId',g.gameId)).length);
+    // Prefer whichever copy still has a genuine cloudId — meaning it's
+    // actually linked to Supabase, the real source of truth — over an
+    // orphaned local copy that lost its link (exactly the scenario that
+    // caused tonight's real duplicates with mismatched scores: a stale,
+    // unlinked local row surviving alongside the correctly-synced one).
+    const withCloudId = group.filter(g => g.cloudId);
+    let master;
+    if (withCloudId.length === 1) {
+      master = withCloudId[0];
+    } else {
+      master = await pickMasterRecord(group, async g => (await DB.getAll('gamePlayers','gameId',g.gameId)).length);
+    }
     const extras = group.filter(g => g.gameId !== master.gameId);
     for (const extra of extras) {
       // Re-point every gamePlayers row referencing the extra onto the master
@@ -7415,11 +7436,31 @@ let _lastIntegrityScan = null;
 async function renderIntegrityTab() {
   const el = document.getElementById('admin-panel-integrity');
   if (!el) return;
+
+  const logRec = await DB.get('appMeta', 'lastIntegrityRepairLog');
+  let logHtml = '';
+  if (logRec && logRec.value) {
+    try {
+      const parsed = JSON.parse(logRec.value);
+      logHtml = `
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">${I18n.t('integ_log_title')}</div>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:8px">${I18n.t('integ_log_last_run', {time: new Date(parsed.at).toLocaleString()})}</p>
+          <div style="max-height:240px;overflow-y:auto">
+            ${parsed.actions.map(a => `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+              <strong>${esc(a.type)}</strong>${a.kept!==undefined?` — kept ${esc(String(a.kept))}, removed ${esc(String(a.removed))}${a.childrenMoved!==undefined?` (${a.childrenMoved} child record(s) re-linked)`:''}`:''}${a.reason?` — ${esc(a.reason)}`:''}
+            </div>`).join('')}
+          </div>
+        </div>`;
+    } catch(e) {}
+  }
+
   el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('integ_intro')}</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <button class="btn btn-primary btn-sm" onclick="handleScanIntegrity()">${I18n.t('integ_btn_scan')}</button>
     </div>
-  </div>`;
+  </div>
+  ${logHtml}`;
 }
 
 function integrityIssueRows(scan) {
@@ -7441,7 +7482,24 @@ async function handleScanIntegrity() {
   const rows = integrityIssueRows(_lastIntegrityScan);
 
   if (!rows.length) {
-    el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><div class="empty"><strong>${I18n.t('integ_all_clean')}</strong></div></div>`;
+    const logRec = await DB.get('appMeta', 'lastIntegrityRepairLog');
+    let logHtml = '';
+    if (logRec && logRec.value) {
+      try {
+        const parsed = JSON.parse(logRec.value);
+        logHtml = `
+          <div class="card" style="margin-top:12px">
+            <div class="card-title">${I18n.t('integ_log_title')}</div>
+            <p style="font-size:11px;color:var(--muted);margin-bottom:8px">${I18n.t('integ_log_last_run', {time: new Date(parsed.at).toLocaleString()})}</p>
+            <div style="max-height:240px;overflow-y:auto">
+              ${parsed.actions.map(a => `<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+                <strong>${esc(a.type)}</strong>${a.kept!==undefined?` — kept ${esc(String(a.kept))}, removed ${esc(String(a.removed))}${a.childrenMoved!==undefined?` (${a.childrenMoved} child record(s) re-linked)`:''}`:''}${a.reason?` — ${esc(a.reason)}`:''}
+              </div>`).join('')}
+            </div>
+          </div>`;
+      } catch(e) {}
+    }
+    el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><div class="empty"><strong>${I18n.t('integ_all_clean')}</strong></div></div>${logHtml}`;
     return;
   }
 
