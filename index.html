@@ -730,11 +730,13 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
       <button class="import-tab" id="atab-kanban" onclick="switchAdminTab('kanban')">&#9646;&#9646; <span data-i18n="adm_tab_kanban">Kanban</span></button>
       <button class="import-tab" id="atab-fields" onclick="switchAdminTab('fields')">&#128065; <span data-i18n="adm_tab_fields">Field Visibility</span></button>
       <button class="import-tab" id="atab-debug" onclick="switchAdminTab('debug')">&#128027; <span data-i18n="adm_tab_debug">Debug</span></button>
+      <button class="import-tab" id="atab-integrity" onclick="switchAdminTab('integrity')">&#128295; <span data-i18n="adm_tab_integrity">Database Integrity</span></button>
     </div>
     <div id="admin-panel-roadmap"></div>
     <div id="admin-panel-kanban" style="display:none"></div>
     <div id="admin-panel-fields" style="display:none"></div>
     <div id="admin-panel-debug" style="display:none"></div>
+    <div id="admin-panel-integrity" style="display:none"></div>
   </div>
 
   <!-- HELP PAGE -->
@@ -1660,6 +1662,7 @@ async function wizardCreateSeason() {
     await buildTrackedNav();
     await Nav.go('home');
     Sync.scheduleAutoSync();
+    await runSilentIntegrityCheck();
   } catch (err) {
     // IndexedDB's put() calls here each run as their own transaction, so
     // this isn't a true atomic database transaction — but on any failure
@@ -2303,6 +2306,7 @@ async function ftwFinalizeSetup() {
 
     renderFTWStepCompleteScreen();
     Sync.scheduleAutoSync();
+    await runSilentIntegrityCheck();
   } catch (err) {
     console.error('[ftwFinalizeSetup] failed, rolling back:', err);
     try {
@@ -2577,6 +2581,304 @@ async function createDestinationSeasonPlayer(sourcePlayerId, destinationSeasonId
     careerPlayerId: careerId,
   });
   return newPlayerId;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// LOCAL DATABASE INTEGRITY CHECKER
+// ══════════════════════════════════════════════════════════════════════════
+// Runs automatically at startup, after sync, after restore, after import,
+// and after season migration. Silent when clean. When problems exist,
+// repairs automatically without asking — matches the approved "the Parent
+// should never notice this running" requirement. Uses natural keys (never
+// IndexedDB primary keys alone) to detect duplicates, since primary keys
+// are exactly what silently multiplied during tonight's real incident.
+
+// Groups an array of records by a natural-key function, returning only
+// groups with more than one member — i.e., genuine duplicate groups.
+function groupDuplicates(records, keyFn) {
+  const groups = {};
+  records.forEach(r => {
+    const key = keyFn(r);
+    if (key === null) return; // records with no usable key are never flagged as duplicates — insufficient data, not a fixable problem
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+  return Object.values(groups).filter(g => g.length > 1);
+}
+
+async function scanDuplicateGames() {
+  const all = (await DB.getAll('games')).filter(g => !g.isDeleted);
+  return groupDuplicates(all, g => {
+    if (!g.date || !g.opponent) return null;
+    return [g.seasonId, g.date, g.opponent, g.competitionType, g.homeAway, g.ownGoalsForUs, g.opponentScore].join('|');
+  });
+}
+
+async function scanDuplicatePlayers() {
+  const all = (await DB.getAll('players')).filter(p => !p.isDeleted);
+  // Group by careerPlayerId + season first (the strongest signal); a
+  // player genuinely appearing twice in the same season under the same
+  // career identity is always a real duplicate, never a legitimate case.
+  return groupDuplicates(all, p => {
+    if (!p.careerPlayerId || !p.seasonId) return null;
+    return [p.careerPlayerId, p.seasonId].join('|');
+  });
+}
+
+async function scanDuplicateOpponents() {
+  const all = (await DB.getAll('opponents')).filter(o => !o.isDeleted);
+  return groupDuplicates(all, o => {
+    if (!o.opponentName) return null;
+    return o.opponentName.trim().toLowerCase();
+  });
+}
+
+async function scanDuplicateSeasons() {
+  const all = (await DB.getAll('seasons')).filter(s => !s.isDeleted);
+  return groupDuplicates(all, s => {
+    if (!s.seasonName || !s.clubName) return null;
+    return [s.clubName.trim().toLowerCase(), s.seasonName].join('|');
+  });
+}
+
+async function scanDuplicateClubTeams() {
+  const all = (await DB.getAll('clubTeams')).filter(c => !c.isDeleted);
+  return groupDuplicates(all, c => {
+    if (!c.name) return null;
+    return c.name.trim().toLowerCase();
+  });
+}
+
+// Phase 5 — broken reference scan. Checks every real parent/child
+// relationship in the app for a child record pointing at a parent that
+// no longer exists (or was soft-deleted) — an orphan, not a duplicate.
+async function scanBrokenReferences() {
+  const issues = [];
+
+  const games = (await DB.getAll('games')).filter(g => !g.isDeleted);
+  const seasons = (await DB.getAll('seasons')).filter(s => !s.isDeleted);
+  const seasonIds = new Set(seasons.map(s => s.seasonId));
+  games.forEach(g => {
+    if (g.seasonId && !seasonIds.has(g.seasonId)) {
+      issues.push({ type: 'orphan_game', record: g, reason: 'seasonId ' + g.seasonId + ' does not exist' });
+    }
+  });
+
+  const gamePlayers = (await DB.getAll('gamePlayers')).filter(gp => !gp.isDeleted);
+  const gameIds = new Set(games.map(g => g.gameId));
+  const players = (await DB.getAll('players')).filter(p => !p.isDeleted);
+  const playerIds = new Set(players.map(p => p.playerId));
+  gamePlayers.forEach(gp => {
+    if (gp.gameId && !gameIds.has(gp.gameId)) {
+      issues.push({ type: 'orphan_gameplayer', record: gp, reason: 'gameId ' + gp.gameId + ' does not exist' });
+    } else if (gp.playerId && !playerIds.has(gp.playerId) && !gp.tempPlayerId) {
+      issues.push({ type: 'orphan_gameplayer', record: gp, reason: 'playerId ' + gp.playerId + ' does not exist' });
+    }
+  });
+
+  const tournaments = (await DB.getAll('tournaments')).filter(t => !t.isDeleted);
+  tournaments.forEach(t => {
+    if (t.seasonId && !seasonIds.has(t.seasonId)) {
+      issues.push({ type: 'orphan_tournament', record: t, reason: 'seasonId ' + t.seasonId + ' does not exist' });
+    }
+  });
+
+  const achievements = (await DB.getAll('achievements')).filter(a => !a.isDeleted);
+  achievements.forEach(a => {
+    if (a.seasonId && !seasonIds.has(a.seasonId)) {
+      issues.push({ type: 'orphan_achievement', record: a, reason: 'seasonId ' + a.seasonId + ' does not exist' });
+    }
+  });
+
+  return issues;
+}
+
+// The full scan — combines every duplicate/reference check into one
+// report. Read-only; call runIntegrityRepair() separately to fix.
+// ══════════════════════════════════════════════════════════════════════════
+// AUTOMATIC REPAIR ENGINE (Phase 4)
+// ══════════════════════════════════════════════════════════════════════════
+// For each duplicate group: pick one master record (prefer whichever one
+// is already referenced by child records — gamePlayers, achievements,
+// etc. — since re-pointing zero children is strictly safer than
+// re-pointing many; fall back to the oldest by createdAt if neither is
+// referenced yet). Re-point every child reference to the master FIRST.
+// Only after that succeeds are the extra duplicate rows soft-deleted —
+// never hard-deleted, and never before their children are safe.
+
+async function pickMasterRecord(group, childCountFn) {
+  // Prefer whichever record already has children pointing at it — this
+  // is the one worth keeping stable, since re-pointing zero children is
+  // always safer than re-pointing several.
+  let best = group[0];
+  let bestChildCount = await childCountFn(best);
+  for (const candidate of group.slice(1)) {
+    const count = await childCountFn(candidate);
+    if (count > bestChildCount) { best = candidate; bestChildCount = count; }
+  }
+  // If every candidate has zero children (a fresh, not-yet-referenced
+  // duplicate set), fall back to the oldest by createdAt — an arbitrary
+  // but stable, deterministic choice.
+  if (bestChildCount === 0) {
+    const sorted = [...group].sort((a,b) => new Date(a.createdAt||0) - new Date(b.createdAt||0));
+    best = sorted[0];
+  }
+  return best;
+}
+
+async function repairDuplicateGames(groups, log) {
+  for (const group of groups) {
+    const master = await pickMasterRecord(group, async g => (await DB.getAll('gamePlayers','gameId',g.gameId)).length);
+    const extras = group.filter(g => g.gameId !== master.gameId);
+    for (const extra of extras) {
+      // Re-point every gamePlayers row referencing the extra onto the master
+      const gps = await DB.getAll('gamePlayers','gameId',extra.gameId);
+      for (const gp of gps) {
+        gp.gameId = master.gameId;
+        await DB.put('gamePlayers', gp);
+      }
+      await DB.softDelete('games', extra.gameId);
+      log.push({ type: 'duplicate_game_repaired', kept: master.gameId, removed: extra.gameId, childrenMoved: gps.length });
+    }
+  }
+}
+
+async function repairDuplicatePlayers(groups, log) {
+  for (const group of groups) {
+    const master = await pickMasterRecord(group, async p => (await DB.getAll('gamePlayers','playerId',p.playerId)).length);
+    const extras = group.filter(p => p.playerId !== master.playerId);
+    for (const extra of extras) {
+      const gps = await DB.getAll('gamePlayers','playerId',extra.playerId);
+      for (const gp of gps) {
+        gp.playerId = master.playerId;
+        await DB.put('gamePlayers', gp);
+      }
+      // Player Game Stats and Achievements also reference playerId directly
+      const stats = (await DB.getAll('playerGameStats')).filter(s => s.playerId === extra.playerId);
+      for (const s of stats) { s.playerId = master.playerId; await DB.put('playerGameStats', s); }
+      const achievements = (await DB.getAll('achievements')).filter(a => a.playerId === extra.playerId);
+      for (const a of achievements) { a.playerId = master.playerId; await DB.put('achievements', a); }
+
+      await DB.softDelete('players', extra.playerId);
+      log.push({ type: 'duplicate_player_repaired', kept: master.playerId, removed: extra.playerId, childrenMoved: gps.length + stats.length + achievements.length });
+    }
+  }
+}
+
+async function repairDuplicateOpponents(groups, log) {
+  for (const group of groups) {
+    const master = await pickMasterRecord(group, async o => (await DB.getAll('games')).filter(g => (g.opponent||'').toLowerCase() === (o.opponentName||'').toLowerCase()).length);
+    const extras = group.filter(o => o.opponentId !== master.opponentId);
+    for (const extra of extras) {
+      // Games reference opponents by NAME (text), not by opponentId, in
+      // this app's current model — nothing to re-point structurally,
+      // the name itself is already shared and correct. Simply remove
+      // the extra catalogue entry.
+      await DB.softDelete('opponents', extra.opponentId);
+      log.push({ type: 'duplicate_opponent_repaired', kept: master.opponentId, removed: extra.opponentId, childrenMoved: 0 });
+    }
+  }
+}
+
+async function repairDuplicateSeasons(groups, log) {
+  for (const group of groups) {
+    const master = await pickMasterRecord(group, async s => (await DB.getAll('games','seasonId',s.seasonId)).length);
+    const extras = group.filter(s => s.seasonId !== master.seasonId);
+    for (const extra of extras) {
+      const games = await DB.getAll('games','seasonId',extra.seasonId);
+      for (const g of games) { g.seasonId = master.seasonId; await DB.put('games', g); }
+      const players = await DB.getAll('players','seasonId',extra.seasonId);
+      for (const p of players) { p.seasonId = master.seasonId; await DB.put('players', p); }
+      const tournaments = await DB.getAll('tournaments','seasonId',extra.seasonId);
+      for (const t of tournaments) { t.seasonId = master.seasonId; await DB.put('tournaments', t); }
+
+      await DB.softDelete('seasons', extra.seasonId);
+      log.push({ type: 'duplicate_season_repaired', kept: master.seasonId, removed: extra.seasonId, childrenMoved: games.length + players.length + tournaments.length });
+    }
+  }
+}
+
+async function repairDuplicateClubTeams(groups, log) {
+  for (const group of groups) {
+    const master = await pickMasterRecord(group, async c => (await DB.getAll('seasons')).filter(s => s.clubTeamId === c.clubTeamId).length);
+    const extras = group.filter(c => c.clubTeamId !== master.clubTeamId);
+    for (const extra of extras) {
+      const seasons = (await DB.getAll('seasons')).filter(s => s.clubTeamId === extra.clubTeamId);
+      for (const s of seasons) { s.clubTeamId = master.clubTeamId; await DB.put('seasons', s); }
+      await DB.softDelete('clubTeams', extra.clubTeamId);
+      log.push({ type: 'duplicate_clubteam_repaired', kept: master.clubTeamId, removed: extra.clubTeamId, childrenMoved: seasons.length });
+    }
+  }
+}
+
+// Broken references — repaired where a safe, unambiguous fix exists;
+// otherwise reported only, per the approved "report only if impossible."
+async function repairBrokenReferences(issues, log) {
+  for (const issue of issues) {
+    if (issue.type === 'orphan_gameplayer') {
+      // A gamePlayers row whose game or player no longer exists cannot
+      // be safely re-pointed (there's no way to guess the correct
+      // replacement) — soft-delete it rather than leave it dangling.
+      await DB.softDelete('gamePlayers', issue.record.gamePlayerId);
+      log.push({ type: 'orphan_removed', store: 'gamePlayers', id: issue.record.gamePlayerId, reason: issue.reason });
+    } else {
+      // Orphan games/tournaments/achievements pointing at a missing
+      // season are reported, not auto-deleted — a missing season is
+      // more likely a genuine data problem worth a Parent's attention
+      // than something safe to silently discard.
+      log.push({ type: 'reported_unresolvable', ...issue, reason: issue.reason });
+    }
+  }
+}
+
+// The full repair pass — scans, then repairs everything it safely can,
+// in dependency order (duplicates before orphans, since fixing
+// duplicates can itself resolve what would otherwise look like an
+// orphan). Returns a log of every action taken, for Phase 7 (Admin-only
+// diagnostic logging) and Phase 8 (post-repair validation).
+async function runIntegrityRepair() {
+  const log = [];
+  const before = await scanDatabaseIntegrity();
+
+  if (before.dupGames.length) await repairDuplicateGames(before.dupGames, log);
+  if (before.dupPlayers.length) await repairDuplicatePlayers(before.dupPlayers, log);
+  if (before.dupOpponents.length) await repairDuplicateOpponents(before.dupOpponents, log);
+  if (before.dupSeasons.length) await repairDuplicateSeasons(before.dupSeasons, log);
+  if (before.dupClubTeams.length) await repairDuplicateClubTeams(before.dupClubTeams, log);
+
+  // Re-scan broken references AFTER duplicate repair, since fixing
+  // duplicates (e.g. a season that existed twice) can itself resolve
+  // references that looked broken only because they pointed at the
+  // "wrong" copy.
+  const brokenRefs = await scanBrokenReferences();
+  if (brokenRefs.length) await repairBrokenReferences(brokenRefs, log);
+
+  if (log.length) {
+    await DB.put('appMeta', { metaKey: 'lastIntegrityRepairLog', value: JSON.stringify({ at: new Date().toISOString(), actions: log }) });
+    Sync.scheduleAutoSync();
+  }
+  return log;
+}
+
+// Silent entry point — call this at startup / after sync / after
+// restore / after import / after season migration, per the approved
+// spec. Does nothing visible if the database is already clean; the
+// Parent never sees this run.
+async function runSilentIntegrityCheck() {
+  try {
+    const log = await runIntegrityRepair();
+    if (log.length) console.log('[Integrity] Silently repaired ' + log.length + ' issue(s).', log);
+  } catch (e) {
+    console.error('[Integrity] Silent check failed:', e);
+  }
+}
+
+async function scanDatabaseIntegrity() {
+  const [dupGames, dupPlayers, dupOpponents, dupSeasons, dupClubTeams, brokenRefs] = await Promise.all([
+    scanDuplicateGames(), scanDuplicatePlayers(), scanDuplicateOpponents(),
+    scanDuplicateSeasons(), scanDuplicateClubTeams(), scanBrokenReferences(),
+  ]);
+  return { dupGames, dupPlayers, dupOpponents, dupSeasons, dupClubTeams, brokenRefs };
 }
 
 async function scanSeasonAssignmentIssues() {
@@ -4907,6 +5209,16 @@ const TR = {
     adm_subtitle:'Super Admin — NextEleven',
     adm_btn_add_item:'Add Item',
     adm_tab_roadmap:'Roadmap', adm_tab_kanban:'Kanban', adm_tab_fields:'Field Visibility', adm_tab_debug:'Debug',
+    adm_tab_integrity:'Database Integrity',
+    integ_title:'Database Integrity', integ_intro:'Scans for duplicate records and broken references caused by sync issues, and repairs them safely without losing any data.',
+    integ_btn_scan:'Scan Database', integ_scanning:'Scanning…', integ_all_clean:'No issues found. Everything looks clean.',
+    integ_found_count:'{n} issue(s) found.', integ_btn_repair:'Repair Automatically', integ_btn_export:'Export Diagnostic Report',
+    integ_problem_dup_game:'Duplicate Game', integ_problem_dup_player:'Duplicate Player', integ_problem_dup_opponent:'Duplicate Opponent',
+    integ_problem_dup_season:'Duplicate Season', integ_problem_dup_clubteam:'Duplicate Club/Team', integ_problem_broken_ref:'Broken Reference',
+    integ_fix_merge:'Merge {n} copies into one, preserving all linked records', integ_status_pending:'Pending Repair',
+    integ_confirm_title:'Repair database issues?', integ_confirm_body:'This safely merges duplicate records and fixes broken references. A backup will be created first. No data is lost.',
+    integ_repair_summary:'{n} issue(s) repaired.',
+
     adm_tab_diagnostics:'Diagnostics',
     idr_title:'Player Identity Review', idr_scanning:'Scanning players across all seasons…',
     idr_none_found:'No likely duplicate player identities found.',
@@ -6008,6 +6320,16 @@ const TR = {
     adm_subtitle:'Super Admin — NextEleven',
     adm_btn_add_item:'Adicionar Item',
     adm_tab_roadmap:'Roteiro', adm_tab_kanban:'Kanban', adm_tab_fields:'Visibilidade de Campos', adm_tab_debug:'Depuração',
+    adm_tab_integrity:'Integridade da Base de Dados',
+    integ_title:'Integridade da Base de Dados', integ_intro:'Procura registos duplicados e referências quebradas causadas por problemas de sincronização, e corrige-os em segurança sem perder dados.',
+    integ_btn_scan:'Analisar Base de Dados', integ_scanning:'A analisar…', integ_all_clean:'Nenhum problema encontrado. Está tudo limpo.',
+    integ_found_count:'{n} problema(s) encontrado(s).', integ_btn_repair:'Reparar Automaticamente', integ_btn_export:'Exportar Relatório de Diagnóstico',
+    integ_problem_dup_game:'Jogo Duplicado', integ_problem_dup_player:'Jogador Duplicado', integ_problem_dup_opponent:'Adversário Duplicado',
+    integ_problem_dup_season:'Época Duplicada', integ_problem_dup_clubteam:'Clube/Equipa Duplicado', integ_problem_broken_ref:'Referência Quebrada',
+    integ_fix_merge:'Fundir {n} cópias numa só, preservando todos os registos associados', integ_status_pending:'Reparação Pendente',
+    integ_confirm_title:'Reparar problemas da base de dados?', integ_confirm_body:'Isto funde registos duplicados e corrige referências quebradas em segurança. Será criada uma cópia de segurança primeiro. Nenhum dado é perdido.',
+    integ_repair_summary:'{n} problema(s) reparado(s).',
+
     adm_tab_diagnostics:'Diagnóstico',
     idr_title:'Revisão de Identidade de Jogadores', idr_scanning:'A analisar jogadores em todas as épocas…',
     idr_none_found:'Não foram encontradas identidades de jogadores possivelmente duplicadas.',
@@ -7048,7 +7370,7 @@ async function initAdmin() {
 
 // ── Admin tab switching ────────────────────────────────────────────────────────
 function switchAdminTab(tab) {
-  ['roadmap','kanban','fields','debug'].forEach(t => {
+  ['roadmap','kanban','fields','debug','integrity'].forEach(t => {
     document.getElementById(`admin-panel-${t}`).style.display = t === tab ? '' : 'none';
     document.getElementById(`atab-${t}`)?.classList.toggle('active-tab', t === tab);
   });
@@ -7056,6 +7378,7 @@ function switchAdminTab(tab) {
   if (tab === 'kanban')  renderKanban();
   if (tab === 'fields')  renderFieldVisibilityTab();
   if (tab === 'debug')   renderDebugTab();
+  if (tab === 'integrity') renderIntegrityTab();
 }
 
 async function renderDebugTab() {
@@ -7082,6 +7405,87 @@ async function toggleDebugMode(on) {
   await setDebugMode(on);
   Toast.show(on ? I18n.t('dbg_toast_on') : I18n.t('dbg_toast_off'));
   await renderDebugTab();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN — DATABASE INTEGRITY (Phase 6)
+// ══════════════════════════════════════════════════════════════════════════
+let _lastIntegrityScan = null;
+
+async function renderIntegrityTab() {
+  const el = document.getElementById('admin-panel-integrity');
+  if (!el) return;
+  el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('integ_intro')}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn btn-primary btn-sm" onclick="handleScanIntegrity()">${I18n.t('integ_btn_scan')}</button>
+    </div>
+  </div>`;
+}
+
+function integrityIssueRows(scan) {
+  const rows = [];
+  scan.dupGames.forEach(g => rows.push({ problem: I18n.t('integ_problem_dup_game'), record: g[0].opponent + ' · ' + fmtDate(g[0].date), fix: I18n.t('integ_fix_merge', {n: g.length}), category: 'dupGames' }));
+  scan.dupPlayers.forEach(g => rows.push({ problem: I18n.t('integ_problem_dup_player'), record: g[0].fullName, fix: I18n.t('integ_fix_merge', {n: g.length}), category: 'dupPlayers' }));
+  scan.dupOpponents.forEach(g => rows.push({ problem: I18n.t('integ_problem_dup_opponent'), record: g[0].opponentName, fix: I18n.t('integ_fix_merge', {n: g.length}), category: 'dupOpponents' }));
+  scan.dupSeasons.forEach(g => rows.push({ problem: I18n.t('integ_problem_dup_season'), record: g[0].seasonName + ' · ' + g[0].clubName, fix: I18n.t('integ_fix_merge', {n: g.length}), category: 'dupSeasons' }));
+  scan.dupClubTeams.forEach(g => rows.push({ problem: I18n.t('integ_problem_dup_clubteam'), record: g[0].name, fix: I18n.t('integ_fix_merge', {n: g.length}), category: 'dupClubTeams' }));
+  scan.brokenRefs.forEach(r => rows.push({ problem: I18n.t('integ_problem_broken_ref'), record: r.type, fix: r.reason, category: 'brokenRefs' }));
+  return rows;
+}
+
+async function handleScanIntegrity() {
+  const el = document.getElementById('admin-panel-integrity');
+  el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('integ_scanning')}</p></div>`;
+
+  _lastIntegrityScan = await scanDatabaseIntegrity();
+  const rows = integrityIssueRows(_lastIntegrityScan);
+
+  if (!rows.length) {
+    el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('integ_title')}</div><div class="empty"><strong>${I18n.t('integ_all_clean')}</strong></div></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">${I18n.t('integ_title')}</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">${I18n.t('integ_found_count', {n: rows.length})}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="handleRepairIntegrity()">${I18n.t('integ_btn_repair')}</button>
+        <button class="btn btn-secondary btn-sm" onclick="handleExportIntegrityReport()">${I18n.t('integ_btn_export')}</button>
+      </div>
+    </div>
+    ${rows.map(r => `
+      <div class="card" style="margin-bottom:8px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">${esc(r.problem)}</div>
+        <div style="font-weight:700;font-size:14px;margin-top:2px">${esc(r.record)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(r.fix)}</div>
+        <div style="font-size:11px;font-weight:700;color:#b03030;margin-top:6px">${I18n.t('integ_status_pending')}</div>
+      </div>
+    `).join('')}
+  `;
+}
+
+async function handleRepairIntegrity() {
+  Confirm.show(I18n.t('integ_confirm_title'), I18n.t('integ_confirm_body'), async () => {
+    await Backup.create('before-integrity-repair');
+    const log = await runIntegrityRepair();
+    Toast.show(I18n.t('integ_repair_summary', {n: log.length}));
+    await handleScanIntegrity(); // re-scan fresh — anything genuinely fixed should now disappear
+  });
+}
+
+function handleExportIntegrityReport() {
+  if (!_lastIntegrityScan) return;
+  const rows = integrityIssueRows(_lastIntegrityScan);
+  const reportText = 'NextEleven Database Integrity Report\n' + new Date().toISOString() + '\n\n' +
+    rows.map(r => `${r.problem} — ${r.record} — ${r.fix}`).join('\n');
+  const blob = new Blob([reportText], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'integrity-report-' + new Date().toISOString().slice(0,10) + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -14695,6 +15099,53 @@ const Sync = (() => {
   }
 
   // ── PULL: cloud → local ────────────────────────────────────────────────────
+  // Natural-key definitions per store — used as a SECOND safety net
+  // alongside cloudId matching. cloudId matching alone is fragile: if an
+  // earlier sync attempt was interrupted or ran before a record's
+  // cloudId was correctly saved locally, every subsequent pull would
+  // fail to find "existing" and silently insert yet another copy —
+  // exactly what caused tonight's real duplicate-games problem. Natural
+  // keys let pull() recognize "this is genuinely the same real record"
+  // even when cloudId linkage has been lost or was never established.
+  function naturalKeyFields(store) {
+    const keys = {
+      games: ['seasonId','date','opponent','competitionType','homeAway'],
+      players: ['careerPlayerId'], // fallback to fullName+dateOfBirth handled separately
+      opponents: ['opponentName'],
+      clubTeams: ['name'],
+      seasons: ['clubName','seasonName'],
+      tournaments: ['seasonId','name'],
+    };
+    return keys[store] || null;
+  }
+
+  function findByNaturalKey(store, allLocal, payload) {
+    const fields = naturalKeyFields(store);
+    if (!fields) return null;
+
+    if (store === 'players') {
+      // careerPlayerId first (the real identity), falling back to
+      // fullName+dateOfBirth only when careerPlayerId is genuinely
+      // absent on both sides — never matching by fullName alone, per
+      // the same rule used throughout tonight's identity work.
+      if (payload.careerPlayerId) {
+        const match = allLocal.find(r => r.careerPlayerId === payload.careerPlayerId && r.seasonId === payload.seasonId);
+        if (match) return match;
+      }
+      if (payload.fullName && payload.dateOfBirth) {
+        return allLocal.find(r => r.fullName === payload.fullName && r.dateOfBirth === payload.dateOfBirth && r.seasonId === payload.seasonId) || null;
+      }
+      return null;
+    }
+
+    // Generic case: every listed field must match exactly (missing/null
+    // fields on either side count as a genuine mismatch, not a wildcard
+    // — deliberately conservative, since a false-positive merge is worse
+    // than an occasional missed duplicate that the integrity checker
+    // will still catch later).
+    return allLocal.find(r => fields.every(f => (r[f] ?? null) === (payload[f] ?? null))) || null;
+  }
+
   async function pull() {
     if (!isConfigured() || !isOnline() || !Auth.isLoggedIn()) return 0;
     let pulled = 0;
@@ -14702,19 +15153,30 @@ const Sync = (() => {
     for (const store of SYNC_STORES) {
       let cloudRecords;
       try { cloudRecords = await supabaseRequest('GET', storeToTable(store), null, sinceParam); } catch(e) { log('Pull error '+store+': '+e.message); continue; }
+      const all = await DB.getAll(store); // fetched once per store, not per record — real records rarely number in the thousands for this app, so this stays cheap
       for (const cr of cloudRecords) {
         if (!cr.payload) continue;
         const payload = cr.payload;
         payload.cloudId = cr.id;
         payload.syncStatus = 'synced';
-        // Check if local record exists
-        const localKey = getKey(store);
-        let existing = null;
-        try {
-          // Find by cloudId
-          const all = await DB.getAll(store);
-          existing = all.find(r => r.cloudId === cr.id);
-        } catch(e) {}
+
+        // 1st check: existing local record already linked by cloudId
+        let existing = all.find(r => r.cloudId === cr.id);
+
+        // 2nd check (the actual fix): if no cloudId match, look for a
+        // genuine natural-key match before assuming this is a new
+        // record. If found, adopt its local primary key so the write
+        // below UPDATES that row instead of inserting a duplicate, and
+        // correctly attaches this cloudId going forward.
+        if (!existing) {
+          const naturalMatch = findByNaturalKey(store, all, payload);
+          if (naturalMatch) {
+            existing = naturalMatch;
+            const localKeyField = getKey(store);
+            payload[localKeyField] = naturalMatch[localKeyField];
+          }
+        }
+
         // Conflict: cloud wins if updatedAt is newer
         if (existing) {
           const localTime = new Date(existing.updatedAt||0).getTime();
@@ -14823,6 +15285,7 @@ const Sync = (() => {
       const pushed = await push();
       _status = 'connected';
       _consecutiveFailures = 0;
+      if (typeof runSilentIntegrityCheck === 'function') await runSilentIntegrityCheck();
       if (!silent) {
         log('Sync complete — pulled: ' + pulled + ', pushed: ' + pushed);
         Toast.show(I18n.t('sync_complete', {pulled, pushed}));
@@ -16638,6 +17101,7 @@ async function restoreFromBackup(backupId) {
     try {
       await Backup.restoreFromBackupId(backupId);
       await loadMeta();
+      await runSilentIntegrityCheck();
       Toast.show(I18n.t('bk_restored_success'));
       await Nav.go('home');
       Sync.scheduleAutoSync();
@@ -16919,6 +17383,7 @@ async function continueAppLoadAfterLogin() {
     await initAdmin();
     if (await isDebugModeOn()) { ensureDebugPanel(); gdDebugLog('App loaded — debug mode active'); gdDebugLog('BUILD MARKER: 2026-07-05-2200-pin-debug'); }
     Sync.startPeriodicSync();
+    await runSilentIntegrityCheck();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
@@ -17467,6 +17932,7 @@ async function confirmImport(type, validated) {
   if (el) el.innerHTML = '<div style="padding:10px;background:#f0faf2;border-radius:3px;font-size:13px;color:#2a7a3b;font-weight:600">&#10003; Import complete — ' + count + ' rows added.</div>';
   window['_importData_' + type] = null;
   Sync.scheduleAutoSync();
+  await runSilentIntegrityCheck();
 }
 
 // Season name is always auto-generated from the start year as "YYYY/YY" —
