@@ -4777,7 +4777,7 @@ const TR = {
     set_lbl_season_name:'Season Name *',
     set_lbl_start_year:'Start Year *',
     set_season_name_preview:'Season:',
-    set_err_season_year:'Enter a valid start year.', set_err_duplicate_season_year:'A season already exists for this year: {name}. Edit or delete it instead of creating another.',
+    set_err_season_year:'Enter a valid start year.', set_err_club_required:'Every season must belong to a club/team. Enter a club name.', set_err_duplicate_season_year:'A season already exists for this year: {name}. Edit or delete it instead of creating another.',
     wiz_entry_title:'Start a New Season', wiz_entry_hint:'Renew with the same club, or set up a new one — takes about a minute.',
     wiz_entry_btn:'Create Season',
     wiz_step_renewal_title:'Is this a renewal?', wiz_step_renewal_body:'Your most recent season was {season} at {club}. Is the new season with the same club/team?',
@@ -5897,7 +5897,7 @@ const TR = {
     set_lbl_season_name:'Nome da Época *',
     set_lbl_start_year:'Ano de Início *',
     set_season_name_preview:'Época:',
-    set_err_season_year:'Indique um ano de início válido.', set_err_duplicate_season_year:'Já existe uma época para este ano: {name}. Edite-a ou elimine-a em vez de criar outra.',
+    set_err_season_year:'Indique um ano de início válido.', set_err_club_required:'Toda a época deve pertencer a um clube/equipa. Indique o nome do clube.', set_err_duplicate_season_year:'Já existe uma época para este ano: {name}. Edite-a ou elimine-a em vez de criar outra.',
     wiz_entry_title:'Iniciar Nova Época', wiz_entry_hint:'Renove com o mesmo clube, ou configure um novo — demora cerca de um minuto.',
     wiz_entry_btn:'Criar Época',
     wiz_step_renewal_title:'É uma renovação?', wiz_step_renewal_body:'A sua época mais recente foi {season} em {club}. A nova época é com o mesmo clube/equipa?',
@@ -13970,7 +13970,7 @@ const Render = (() => {
               <div style="font-size:11px;color:var(--muted);margin-top:4px">${I18n.t('set_season_name_preview')} <strong id="sf-name-preview" style="color:var(--dark)"></strong></div>
               <input type="hidden" id="sf-name">
             </div>
-            <div class="form-group"><label>${I18n.t('set_lbl_club_name')}</label><input id="sf-club" type="text" placeholder="e.g. SL Olivais"></div>
+            <div class="form-group"><label>${I18n.t('set_lbl_club_name')} *</label><input id="sf-club" type="text" placeholder="e.g. SL Olivais"></div>
             <div class="form-group"><label>${I18n.t('set_lbl_home_ground')}</label><input id="sf-homeground" type="text" placeholder="e.g. Campo SL Olivais"></div>
             <div class="form-group"><label>${I18n.t('set_lbl_age_group')}</label>${renderAgeGroupField('sf-age', 'sf-age-other', '')}</div>
             <div class="form-group"><label>${I18n.t('set_lbl_match_duration')}</label>
@@ -14022,7 +14022,7 @@ const Render = (() => {
                 <input id="sf-edit-startyear" type="number" min="2000" max="2100" value="${State.currentSeason?.startYear||''}" oninput="updateSeasonEditNamePreview()">
                 <div style="font-size:11px;color:var(--muted);margin-top:4px">${I18n.t('set_season_name_preview')} <strong id="sf-edit-name-preview" style="color:var(--dark)">${esc(State.currentSeason?.seasonName||'')}</strong></div>
               </div>
-              <div class="form-group"><label>${I18n.t('set_lbl_club_name')}</label><input id="sf-edit-club" type="text" placeholder="e.g. SL Olivais" value="${esc(State.currentSeason?.clubName||'')}"></div>
+              <div class="form-group"><label>${I18n.t('set_lbl_club_name')} *</label><input id="sf-edit-club" type="text" placeholder="e.g. SL Olivais" value="${esc(State.currentSeason?.clubName||'')}"></div>
               <div class="form-group"><label>Home Ground</label><input id="sf-edit-homeground" type="text" placeholder="e.g. Campo SL Olivais" value="${esc(State.currentSeason?.homeGround||'')}"></div>
               <div class="form-group"><label>Age Group</label>${renderAgeGroupField('sf-edit-age', 'sf-edit-age-other', State.currentSeason?.ageGroup||'')}</div>
               <div class="form-group"><label>${I18n.t('set_lbl_shirt_color')} <span style="font-size:10px;font-weight:400;color:#999">${I18n.t('set_shirt_color_hint')}</span></label>
@@ -17384,6 +17384,10 @@ document.addEventListener('click', async e => {
     const yearInput = document.getElementById('sf-startyear');
     const startYear = parseInt(yearInput?.value);
     if (!startYear || startYear < 2000 || startYear > 2100) { Toast.error(I18n.t('set_err_season_year')); return; }
+    // A season must never exist without a club — confirmed as a real,
+    // explicit rule. Previously this field silently allowed null.
+    const clubNameInput = document.getElementById('sf-club')?.value.trim();
+    if (!clubNameInput) { Toast.error(I18n.t('set_err_club_required')); return; }
     // Block creating a second season for a year that already has one —
     // this was previously silently allowed, and created exactly the
     // "two seasons both called 2026/27" problem that's confusing to
@@ -17395,12 +17399,25 @@ document.addEventListener('click', async e => {
       Toast.error(I18n.t('set_err_duplicate_season_year', {name: duplicate.seasonName}));
       return;
     }
+
+    // Find or create the real clubTeams record, matching the same
+    // normalization used throughout tonight's identity work — reuses an
+    // existing club rather than creating a duplicate one for the same
+    // real club typed slightly differently.
+    const normalize = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const existingClubTeams = await DB.getAll('clubTeams');
+    let clubTeamId = existingClubTeams.find(c => normalize(c.name) === normalize(clubNameInput))?.clubTeamId;
+    if (!clubTeamId) {
+      clubTeamId = await DB.put('clubTeams', { name: clubNameInput, createdAt: new Date().toISOString() });
+    }
+
     const name = buildSeasonName(startYear);
     const shirtColorInput = document.getElementById('sf-shirtcolor');
     const season = {
       seasonName: name,
       startYear,
-      clubName: document.getElementById('sf-club')?.value.trim()||null,
+      clubTeamId,
+      clubName: clubNameInput,
       homeGround: document.getElementById('sf-homeground')?.value.trim()||null,
       ageGroup: readAgeGroupField('sf-age', 'sf-age-other'),
       defaultMatchDurationMins: readDurationFromForm('sf-duration-select', 'sf-duration-custom'),
@@ -17438,13 +17455,24 @@ document.addEventListener('click', async e => {
       return;
     }
 
+    const editClubName = document.getElementById('sf-edit-club')?.value.trim();
+    if (!editClubName) { Toast.error(I18n.t('set_err_club_required')); return; }
+
+    const normalize = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const existingClubTeams = await DB.getAll('clubTeams');
+    let editClubTeamId = existingClubTeams.find(c => normalize(c.name) === normalize(editClubName))?.clubTeamId;
+    if (!editClubTeamId) {
+      editClubTeamId = await DB.put('clubTeams', { name: editClubName, createdAt: new Date().toISOString() });
+    }
+
     const editShirtInput = document.getElementById('sf-edit-shirtcolor');
     const editShirtVal = editShirtInput ? editShirtInput.value : '';
     const updated = {
       ...State.currentSeason,
       startYear: newStartYear,
       seasonName: buildSeasonName(newStartYear),
-      clubName:   document.getElementById('sf-edit-club')?.value.trim()||null,
+      clubTeamId: editClubTeamId,
+      clubName:   editClubName,
       homeGround: document.getElementById('sf-edit-homeground')?.value.trim()||null,
       ageGroup:   readAgeGroupField('sf-edit-age', 'sf-edit-age-other'),
       shirtColor: (editShirtVal && editShirtVal.toUpperCase() !== '#B23333') ? editShirtVal : null,
