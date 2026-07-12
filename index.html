@@ -1529,7 +1529,7 @@ async function renderWizardStepPlayerCarryOver() {
           ${activePlayers.map(p => `
             <label style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
               <input type="checkbox" class="wiz-player-checkbox" value="${p.playerId}" checked>
-              ${esc(p.fullName)}${p.shirtNumber?` (#${p.shirtNumber})`:''}
+              ${esc(shortName(p.fullName))}${p.shirtNumber?` (#${p.shirtNumber})`:''}
             </label>`).join('')}
         </div>
 
@@ -1589,7 +1589,7 @@ function renderWizardStepReview() {
         <div class="card" style="margin-bottom:12px">
           <div class="card-title">${I18n.t('wiz_review_players_label')}</div>
           <div style="font-size:14px;font-weight:700">${I18n.t('wiz_review_players_count', {n: playerCount})}</div>
-          ${playerCount ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">${s.playersToCarry.map(p => esc(p.fullName)).join(', ')}</div>` : ''}
+          ${playerCount ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">${s.playersToCarry.map(p => esc(shortName(p.fullName))).join(', ')}</div>` : ''}
         </div>
 
         <div class="card" style="margin-bottom:12px;background:var(--bg)">
@@ -8128,11 +8128,11 @@ async function buildTrackedNav() {
   if (!navEl || !sectionsEl) return;
 
   navEl.innerHTML = tracked.map(p =>
-    `<button class="nav-link" data-section="tracked-${p.playerId}" onclick="Nav.go('tracked-${p.playerId}')">${esc(p.fullName)}</button>`
+    `<button class="nav-link" data-section="tracked-${p.playerId}" onclick="Nav.go('tracked-${p.playerId}')">${esc(shortName(p.fullName))}</button>`
   ).join('');
 
   if (mobileEl) mobileEl.innerHTML = tracked.map(p =>
-    `<button class="nav-link" data-section="tracked-${p.playerId}" onclick="Nav.go('tracked-${p.playerId}');document.getElementById('mobileMenu').classList.remove('open')">${esc(p.fullName)}</button>`
+    `<button class="nav-link" data-section="tracked-${p.playerId}" onclick="Nav.go('tracked-${p.playerId}');document.getElementById('mobileMenu').classList.remove('open')">${esc(shortName(p.fullName))}</button>`
   ).join('');
 
   // Build dynamic sections
@@ -8140,7 +8140,7 @@ async function buildTrackedNav() {
     <div class="section" id="sec-tracked-${p.playerId}">
       <div class="page-header">
         <div>
-          <h1>${esc(p.fullName)}</h1>
+          <h1>${esc(shortName(p.fullName))}</h1>
           <div class="page-header-sub" id="tracked-subtitle-${p.playerId}"></div>
         </div>
         <div class="btn-group">
@@ -10743,7 +10743,7 @@ async function renderExtendedStats(playerId) {
   el.innerHTML = `
     <!-- Season Totals -->
     <div class="card">
-      <div class="card-title">${I18n.t('ext_season_totals')} — ${esc(player.fullName)}</div>
+      <div class="card-title">${I18n.t('ext_season_totals')} — ${esc(shortName(player.fullName))}</div>
       ${visibleSections.length ? visibleSections.map(section => `
         <div style="margin-bottom:12px">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:8px">${extSectionLabel(section)}</div>
@@ -10971,7 +10971,7 @@ async function renderMatchLog(playerId) {
 
   el.innerHTML = `
     <div class="card">
-      <div class="card-title">${I18n.t('tp_card_match_by_match')} — ${esc(player.fullName)}</div>
+      <div class="card-title">${I18n.t('tp_card_match_by_match')} — ${esc(shortName(player.fullName))}</div>
       <div class="game-detail-table-wrap" style="margin-bottom:0">
         <table class="game-detail-table" style="min-width:980px">
           <thead><tr>
@@ -11047,7 +11047,7 @@ async function renderPlayerClubHistory(playerId) {
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <h3 style="font-size:14px;font-weight:700">${I18n.t('ch_title')} — ${esc(player.fullName)}</h3>
+      <h3 style="font-size:14px;font-weight:700">${I18n.t('ch_title')} — ${esc(shortName(player.fullName))}</h3>
       <button class="btn btn-primary btn-sm" onclick="openClubHistoryForm(${playerId})">+ ${I18n.t('ch_btn_add')}</button>
     </div>
     <div id="clubHistoryForm-${playerId}" class="form-panel panel-hidden" style="margin-bottom:16px">
@@ -11273,7 +11273,7 @@ async function renderPlayerAchievements(playerId) {
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <h3 style="font-size:14px;font-weight:700">${I18n.t('ach_title')} — ${esc(player.fullName)}</h3>
+      <h3 style="font-size:14px;font-weight:700">${I18n.t('ach_title')} — ${esc(shortName(player.fullName))}</h3>
       <button class="btn btn-primary btn-sm" onclick="openAchievementForm(${playerId})">+ ${I18n.t('ach_btn_add')}</button>
     </div>
     <div id="achievementForm-${playerId}" class="form-panel panel-hidden" style="margin-bottom:16px">
@@ -12626,7 +12626,7 @@ async function renderPlayerEvents(playerId) {
 
   el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <h3 style="font-size:14px;font-weight:700">${I18n.t('ev_title')} — ${esc(player.fullName)}</h3>
+      <h3 style="font-size:14px;font-weight:700">${I18n.t('ev_title')} — ${esc(shortName(player.fullName))}</h3>
       <button class="btn btn-primary btn-sm" onclick="openEventForm(${playerId})">+ ${I18n.t('ev_btn_add')}</button>
     </div>
     <p style="font-size:11px;color:var(--muted);margin-bottom:14px">${I18n.t('ev_subtitle')}</p>
@@ -13503,7 +13503,7 @@ const Render = (() => {
       return;
     }
 
-    if (sub) sub.textContent = `${lor.fullName} · ${State.currentSeason.seasonName}`;
+    if (sub) sub.textContent = State.currentSeason.seasonName;
 
     const games = await DB.getAll('games','seasonId',State.currentSeasonId);
     const allGP = await DB.getAll('gamePlayers','seasonId',State.currentSeasonId);
