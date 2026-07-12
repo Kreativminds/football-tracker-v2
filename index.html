@@ -2469,6 +2469,112 @@ function readAgeGroupField(selectId, customId) {
 // function already used for the at-entry validation. Flags only genuine
 // mismatches; makes no changes itself. Super Admin only, reached via
 // Admin -> Diagnostics -> Season Assignment Audit.
+// ══════════════════════════════════════════════════════════════════════════
+// PLAYER IDENTITY REVIEW — Admin diagnostic tool, runs BEFORE Season moves
+// ══════════════════════════════════════════════════════════════════════════
+// Groups every player row across every season by careerPlayerId first
+// (the only real, trusted identity link). Rows with no careerPlayerId, or
+// whose normalized name+DOB matches another row under a DIFFERENT
+// careerPlayerId, are surfaced as a REVIEW SUGGESTION only — the Parent
+// must explicitly confirm any link; nothing is ever merged automatically
+// by name or DOB alone.
+function normalizePlayerIdentityKey(fullName, dateOfBirth) {
+  const nameNorm = (fullName||'').trim().toLowerCase().replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return nameNorm + '|' + (dateOfBirth||'');
+}
+
+async function scanPlayerIdentityGroups() {
+  const allPlayers = await DB.getAll('players');
+  const allSeasons = await DB.getAll('seasons');
+  const seasonById = {};
+  allSeasons.forEach(s => { seasonById[s.seasonId] = s; });
+
+  // Group by normalized name+DOB — this is the review-suggestion grouping,
+  // never an automatic merge. Two rows landing in the same group here
+  // only means "worth a human look," nothing more.
+  const groups = {};
+  allPlayers.forEach(p => {
+    const key = normalizePlayerIdentityKey(p.fullName, p.dateOfBirth);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
+  });
+
+  const reviewItems = [];
+  for (const key of Object.keys(groups)) {
+    const rows = groups[key];
+    if (rows.length < 2) continue; // nothing to review — this identity only has one row anywhere
+
+    // Do all rows in this name+DOB group already share the same real
+    // careerPlayerId? If so, they're already correctly linked — nothing
+    // to review, this isn't an issue.
+    const careerIds = new Set(rows.filter(r => r.careerPlayerId).map(r => r.careerPlayerId));
+    if (careerIds.size === 1 && rows.every(r => r.careerPlayerId)) continue;
+
+    reviewItems.push({
+      displayName: rows[0].fullName,
+      rows: rows.map(r => ({
+        playerId: r.playerId,
+        seasonId: r.seasonId,
+        seasonName: seasonById[r.seasonId]?.seasonName || 'Unknown season',
+        clubName: seasonById[r.seasonId]?.clubName || null,
+        shirtNumber: r.shirtNumber,
+        primaryPosition: r.primaryPosition,
+        dateOfBirth: r.dateOfBirth,
+        careerPlayerId: r.careerPlayerId || null,
+      })),
+    });
+  }
+
+  return reviewItems;
+}
+
+// Links the given player rows to share one careerPlayerId. If
+// targetCareerId is null, generates a brand new one; otherwise uses the
+// provided existing id. Only ever updates the careerPlayerId field on
+// the selected rows — never touches gamePlayers, achievements, or any
+// other record, and never deletes a player row.
+async function linkPlayerRowsToSharedIdentity(playerIds, targetCareerId) {
+  const careerId = targetCareerId || generateCareerPlayerId();
+  for (const playerId of playerIds) {
+    const p = await DB.get('players', playerId);
+    if (!p) continue;
+    p.careerPlayerId = careerId;
+    await DB.put('players', p);
+  }
+  return careerId;
+}
+
+// "Create destination Season player from this player profile" — used
+// when a game/tournament is being moved but no destination-season player
+// row exists yet for a real career identity. Copies identity/profile
+// fields only; never copies stats, never copies gamePlayers, never
+// creates an achievement. The original source row is left completely
+// untouched.
+async function createDestinationSeasonPlayer(sourcePlayerId, destinationSeasonId) {
+  const source = await DB.get('players', sourcePlayerId);
+  if (!source) return null;
+  const careerId = source.careerPlayerId || generateCareerPlayerId();
+  if (!source.careerPlayerId) {
+    source.careerPlayerId = careerId;
+    await DB.put('players', source);
+  }
+  const newPlayerId = await DB.put('players', {
+    seasonId: destinationSeasonId,
+    fullName: source.fullName,
+    dateOfBirth: source.dateOfBirth || null,
+    nationality: source.nationality || null,
+    primaryPosition: source.primaryPosition || null,
+    secondaryPosition: source.secondaryPosition || null,
+    dominantFoot: source.dominantFoot || null,
+    height: source.height || null,
+    weight: source.weight || null,
+    shirtNumber: source.shirtNumber || null,
+    isActive: true,
+    careerPlayerId: careerId,
+  });
+  return newPlayerId;
+}
+
 async function scanSeasonAssignmentIssues() {
   const allSeasons = await DB.getAll('seasons');
   const seasonByStartYear = {};
@@ -2587,12 +2693,12 @@ async function resolvePlayerMappingForSeasonMove(gameId, destinationSeasonId) {
 
   for (const gp of realGps) {
     const sourcePlayer = await DB.get('players', gp.playerId);
-    if (!sourcePlayer) { unresolved.push({ gamePlayerId: gp.gamePlayerId, reason: 'source player record missing' }); continue; }
-    if (!sourcePlayer.careerPlayerId) { unresolved.push({ gamePlayerId: gp.gamePlayerId, playerName: sourcePlayer.fullName, reason: 'no careerPlayerId on source player' }); continue; }
+    if (!sourcePlayer) { unresolved.push({ gamePlayerId: gp.gamePlayerId, playerId: gp.playerId, reason: 'source player record missing' }); continue; }
+    if (!sourcePlayer.careerPlayerId) { unresolved.push({ gamePlayerId: gp.gamePlayerId, playerId: gp.playerId, playerName: sourcePlayer.fullName, reason: 'no careerPlayerId on source player' }); continue; }
 
     const destinationPlayer = destinationByCareerId[sourcePlayer.careerPlayerId];
     if (!destinationPlayer) {
-      unresolved.push({ gamePlayerId: gp.gamePlayerId, playerName: sourcePlayer.fullName, reason: 'no matching player exists yet in the destination season' });
+      unresolved.push({ gamePlayerId: gp.gamePlayerId, playerId: gp.playerId, playerName: sourcePlayer.fullName, reason: 'no matching player exists yet in the destination season' });
       continue;
     }
     resolved.push({ gamePlayerId: gp.gamePlayerId, oldPlayerId: gp.playerId, newPlayerId: destinationPlayer.playerId });
@@ -4796,6 +4902,19 @@ const TR = {
     adm_btn_add_item:'Add Item',
     adm_tab_roadmap:'Roadmap', adm_tab_kanban:'Kanban', adm_tab_fields:'Field Visibility', adm_tab_debug:'Debug',
     adm_tab_diagnostics:'Diagnostics',
+    idr_title:'Player Identity Review', idr_scanning:'Scanning players across all seasons…',
+    idr_none_found:'No likely duplicate player identities found.',
+    idr_hint:'These player rows may represent the same real child across different seasons. Review carefully before confirming — nothing is ever merged automatically.',
+    idr_lbl_shirt:'Shirt', idr_lbl_dob:'DOB', idr_missing_career_id:'missing',
+    idr_btn_create_new_link:'Link Selected (New ID)', idr_btn_use_existing:'Link Selected (Use Existing ID)', idr_btn_keep_separate:'Keep Separate',
+    idr_err_select_two:'Select at least two rows to link.', idr_err_need_one_existing:'Select rows where exactly one already has a careerPlayerId to use as the shared identity.',
+    idr_confirm_title:'Link these player rows?', idr_confirm_body_new:'This links {n} player row(s) to a new shared identity. No data is deleted or merged.',
+    idr_confirm_body_existing:'This links {n} player row(s) to the existing shared identity. No data is deleted or merged.',
+    idr_linked_toast:'Player rows linked.',
+    audit_unresolved_players_label:'Unresolved player mappings', audit_unknown_player:'Unknown player',
+    audit_btn_create_destination_player:'Create destination Season player', audit_destination_player_created:'Destination player created.',
+    audit_err_create_player_failed:'Could not create the destination player.',
+
     audit_title:'Season Assignment Audit', audit_scanning:'Scanning games and tournaments…',
     audit_none_found:'No season assignment issues found.', audit_found_count:'{n} issue(s) found.',
     audit_btn_select_all:'Select All', audit_btn_select_none:'Select None', audit_btn_move_selected:'Move Selected',
@@ -5882,6 +6001,19 @@ const TR = {
     adm_btn_add_item:'Adicionar Item',
     adm_tab_roadmap:'Roteiro', adm_tab_kanban:'Kanban', adm_tab_fields:'Visibilidade de Campos', adm_tab_debug:'Depuração',
     adm_tab_diagnostics:'Diagnóstico',
+    idr_title:'Revisão de Identidade de Jogadores', idr_scanning:'A analisar jogadores em todas as épocas…',
+    idr_none_found:'Não foram encontradas identidades de jogadores possivelmente duplicadas.',
+    idr_hint:'Estas linhas de jogador podem representar a mesma criança real em épocas diferentes. Reveja cuidadosamente antes de confirmar — nada é fundido automaticamente.',
+    idr_lbl_shirt:'Número', idr_lbl_dob:'Data Nasc.', idr_missing_career_id:'em falta',
+    idr_btn_create_new_link:'Ligar Selecionados (Novo ID)', idr_btn_use_existing:'Ligar Selecionados (Usar ID Existente)', idr_btn_keep_separate:'Manter Separados',
+    idr_err_select_two:'Selecione pelo menos duas linhas para ligar.', idr_err_need_one_existing:'Selecione linhas onde exatamente uma já tem um careerPlayerId para usar como identidade partilhada.',
+    idr_confirm_title:'Ligar estas linhas de jogador?', idr_confirm_body_new:'Isto liga {n} linha(s) de jogador a uma nova identidade partilhada. Nenhum dado é eliminado ou fundido.',
+    idr_confirm_body_existing:'Isto liga {n} linha(s) de jogador à identidade partilhada existente. Nenhum dado é eliminado ou fundido.',
+    idr_linked_toast:'Linhas de jogador ligadas.',
+    audit_unresolved_players_label:'Mapeamentos de jogadores não resolvidos', audit_unknown_player:'Jogador desconhecido',
+    audit_btn_create_destination_player:'Criar jogador na Época de destino', audit_destination_player_created:'Jogador de destino criado.',
+    audit_err_create_player_failed:'Não foi possível criar o jogador de destino.',
+
     audit_title:'Auditoria de Atribuição de Época', audit_scanning:'A analisar jogos e torneios…',
     audit_none_found:'Não foram encontrados problemas de atribuição de época.', audit_found_count:'{n} problema(s) encontrado(s).',
     audit_btn_select_all:'Selecionar Tudo', audit_btn_select_none:'Não Selecionar Nada', audit_btn_move_selected:'Mover Selecionados',
@@ -6950,23 +7082,142 @@ async function toggleDebugMode(on) {
 // ══════════════════════════════════════════════════════════════════════════
 let _seasonAuditIssues = [];
 
+let _playerIdentityGroups = [];
+
 async function renderDiagnosticsTab() {
   const el = document.getElementById('admin-panel-diagnostics');
+  if (!el) return;
+  el.innerHTML = `
+    <div id="identityReviewContainer"></div>
+    <div id="seasonAuditContainer"></div>
+  `;
+  await renderIdentityReviewSection();
+  await renderSeasonAuditSection();
+}
+
+async function renderIdentityReviewSection() {
+  const el = document.getElementById('identityReviewContainer');
+  if (!el) return;
+  el.innerHTML = `<div class="card" style="margin-bottom:14px"><div class="card-title">${I18n.t('idr_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('idr_scanning')}</p></div>`;
+
+  _playerIdentityGroups = await scanPlayerIdentityGroups();
+
+  if (!_playerIdentityGroups.length) {
+    el.innerHTML = `<div class="card" style="margin-bottom:14px"><div class="card-title">${I18n.t('idr_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('idr_none_found')}</p></div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:14px;background:#fbf3d9;border:1px solid #d9c26b">
+      <div class="card-title">${I18n.t('idr_title')}</div>
+      <p style="font-size:12px;color:#8a6d1e;margin-bottom:12px">${I18n.t('idr_hint')}</p>
+      ${_playerIdentityGroups.map((group, gi) => `
+        <div class="card" style="margin-bottom:10px;background:#fff">
+          <div style="font-weight:700;font-size:14px;margin-bottom:8px">${esc(group.displayName)}</div>
+          ${group.rows.map((r, ri) => `
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+              <input type="checkbox" class="idr-row-checkbox" data-group="${gi}" data-row="${ri}" style="margin-top:3px">
+              <span>
+                <strong>${esc(r.seasonName)}</strong>${r.clubName?' · '+esc(r.clubName):''}<br>
+                ${I18n.t('idr_lbl_shirt')}: ${r.shirtNumber||'—'} · ${esc(r.primaryPosition||'—')}${r.dateOfBirth?' · '+I18n.t('idr_lbl_dob')+': '+fmtDate(r.dateOfBirth):''}<br>
+                <span style="color:var(--muted)">careerPlayerId: ${r.careerPlayerId ? esc(r.careerPlayerId) : I18n.t('idr_missing_career_id')}</span>
+              </span>
+            </label>
+          `).join('')}
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="handleLinkPlayerGroup(${gi}, 'new')">${I18n.t('idr_btn_create_new_link')}</button>
+            <button class="btn btn-secondary btn-sm" onclick="handleLinkPlayerGroup(${gi}, 'existing')">${I18n.t('idr_btn_use_existing')}</button>
+            <button class="btn btn-secondary btn-sm" onclick="handleKeepSeparate(${gi})">${I18n.t('idr_btn_keep_separate')}</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+async function handleLinkPlayerGroup(groupIndex, mode) {
+  const group = _playerIdentityGroups[groupIndex];
+  if (!group) return;
+  const checked = Array.from(document.querySelectorAll(`.idr-row-checkbox[data-group="${groupIndex}"]:checked`))
+    .map(cb => group.rows[parseInt(cb.dataset.row)]);
+  if (checked.length < 2) { Toast.error(I18n.t('idr_err_select_two')); return; }
+
+  const playerIds = checked.map(r => r.playerId);
+
+  if (mode === 'existing') {
+    const existingIds = [...new Set(checked.filter(r => r.careerPlayerId).map(r => r.careerPlayerId))];
+    if (existingIds.length !== 1) {
+      Toast.error(I18n.t('idr_err_need_one_existing'));
+      return;
+    }
+    Confirm.show(I18n.t('idr_confirm_title'), I18n.t('idr_confirm_body_existing', {n: playerIds.length}), async () => {
+      await linkPlayerRowsToSharedIdentity(playerIds, existingIds[0]);
+      Toast.show(I18n.t('idr_linked_toast'));
+      Sync.scheduleAutoSync();
+      await renderIdentityReviewSection();
+    });
+  } else {
+    Confirm.show(I18n.t('idr_confirm_title'), I18n.t('idr_confirm_body_new', {n: playerIds.length}), async () => {
+      await linkPlayerRowsToSharedIdentity(playerIds, null);
+      Toast.show(I18n.t('idr_linked_toast'));
+      Sync.scheduleAutoSync();
+      await renderIdentityReviewSection();
+    });
+  }
+}
+
+function handleKeepSeparate(groupIndex) {
+  // "Keep separate" is a review-only dismissal — it doesn't change any
+  // data, it just removes this group from view for this session. Since
+  // nothing is stored, the group will reappear on the next full re-scan;
+  // that's intentional; this is a lightweight audit tool, not a
+  // permanent-dismissal system.
+  _playerIdentityGroups.splice(groupIndex, 1);
+  renderIdentityReviewSection();
+}
+
+async function renderSeasonAuditSection() {
+  const el = document.getElementById('seasonAuditContainer');
   if (!el) return;
   el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('audit_title')}</div><p style="font-size:12px;color:var(--muted)">${I18n.t('audit_scanning')}</p></div>`;
 
   _seasonAuditIssues = await scanSeasonAssignmentIssues();
-  renderSeasonAuditResults();
+  await renderSeasonAuditResults();
 }
 
-function renderSeasonAuditResults() {
-  const el = document.getElementById('admin-panel-diagnostics');
+async function renderSeasonAuditResults() {
+  const el = document.getElementById('seasonAuditContainer');
   if (!el) return;
   const issues = _seasonAuditIssues;
 
   if (!issues.length) {
     el.innerHTML = `<div class="card"><div class="card-title">${I18n.t('audit_title')}</div><div class="empty"><strong>${I18n.t('audit_none_found')}</strong></div></div>`;
     return;
+  }
+
+  // Pre-check player mapping for every resolvable issue BEFORE rendering
+  // anything — per the approved correction, a tournament must never be
+  // silently failed as a whole; instead every unresolved player is shown
+  // up front, with a real action to fix it (create the destination
+  // player), and that specific issue's checkbox is disabled until
+  // resolved.
+  for (const issue of issues) {
+    if (issue.resolvable === false || !issue.expectedSeasonId) { issue._mappingOk = false; continue; }
+    if (issue.type === 'game') {
+      const { unresolved } = await resolvePlayerMappingForSeasonMove(issue.gameId, issue.expectedSeasonId);
+      issue._unresolvedPlayers = unresolved;
+      issue._mappingOk = unresolved.length === 0;
+    } else if (issue.type === 'tournament') {
+      const allGames = await DB.getAll('games');
+      const linkedGames = allGames.filter(g => g.tournamentId === issue.tournamentId);
+      let allUnresolved = [];
+      for (const g of linkedGames) {
+        const { unresolved } = await resolvePlayerMappingForSeasonMove(g.gameId, issue.expectedSeasonId);
+        allUnresolved = allUnresolved.concat(unresolved.map(u => ({...u, gameId: g.gameId, opponent: g.opponent})));
+      }
+      issue._unresolvedPlayers = allUnresolved;
+      issue._mappingOk = allUnresolved.length === 0;
+    }
   }
 
   el.innerHTML = `
@@ -6979,10 +7230,12 @@ function renderSeasonAuditResults() {
         <button class="btn btn-primary btn-sm" onclick="seasonAuditMoveSelected()">${I18n.t('audit_btn_move_selected')}</button>
       </div>
     </div>
-    ${issues.map((issue, i) => `
-      <div class="card" style="margin-bottom:8px;${issue.resolvable===false?'opacity:0.7':''}">
+    ${issues.map((issue, i) => {
+      const canSelect = issue.resolvable !== false && issue._mappingOk;
+      return `
+      <div class="card" style="margin-bottom:8px;${!canSelect?'opacity:0.85':''}">
         <div style="display:flex;gap:10px;align-items:flex-start">
-          ${issue.resolvable !== false ? `<input type="checkbox" class="season-audit-checkbox" data-index="${i}" style="margin-top:4px">` : `<span style="width:16px;flex-shrink:0;text-align:center;color:#b03030" title="${I18n.t('audit_not_resolvable')}">&#9888;</span>`}
+          ${canSelect ? `<input type="checkbox" class="season-audit-checkbox" data-index="${i}" style="margin-top:4px">` : `<span style="width:16px;flex-shrink:0;text-align:center;color:#b03030" title="${I18n.t('audit_not_resolvable')}">&#9888;</span>`}
           <div style="flex:1">
             <div style="font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:700">${esc(issue.recordType)}</div>
             <div style="font-weight:700;font-size:14px">${esc(issue.name)}</div>
@@ -6994,11 +7247,41 @@ function renderSeasonAuditResults() {
             </div>
             ${issue.linkedGamesCount!==undefined?`<div style="font-size:11px;color:var(--muted);margin-top:4px">${I18n.t('audit_linked_games', {n: issue.linkedGamesCount})}</div>`:''}
             ${issue.linkedStatsCount!==undefined?`<div style="font-size:11px;color:var(--muted);margin-top:4px">${I18n.t('audit_linked_stats', {n: issue.linkedStatsCount})}</div>`:''}
-            <div style="font-size:12px;font-weight:700;margin-top:6px;color:${issue.resolvable===false?'#b03030':'#2a7a4e'}">${esc(issue.proposedAction)}</div>
+            ${issue._unresolvedPlayers && issue._unresolvedPlayers.length ? `
+              <div style="margin-top:8px;padding:8px;background:#fbe9e9;border-radius:4px">
+                <div style="font-size:11px;font-weight:700;color:#b03030;margin-bottom:4px">${I18n.t('audit_unresolved_players_label')}</div>
+                ${issue._unresolvedPlayers.map(u => `
+                  <div style="font-size:12px;margin-bottom:4px">
+                    ${esc(u.playerName || I18n.t('audit_unknown_player'))} — ${esc(u.reason)}
+                    <button class="btn btn-secondary btn-sm" style="margin-left:6px" onclick="handleCreateDestinationPlayer(${i}, ${u.playerId})">${I18n.t('audit_btn_create_destination_player')}</button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            <div style="font-size:12px;font-weight:700;margin-top:6px;color:${canSelect?'#2a7a4e':'#b03030'}">${esc(issue.proposedAction)}</div>
           </div>
         </div>
-      </div>`).join('')}
+      </div>`;
+    }).join('')}
   `;
+}
+
+// "Create destination Season player from this player profile" — resolves
+// one specific unresolved player by creating their destination-season
+// row (copying identity fields only, per the approved rules), then
+// re-runs the mapping check for this issue so its checkbox becomes
+// selectable the moment it's genuinely safe.
+async function handleCreateDestinationPlayer(issueIndex, sourcePlayerId) {
+  const issue = _seasonAuditIssues[issueIndex];
+  if (!issue || !issue.expectedSeasonId) return;
+  const newPlayerId = await createDestinationSeasonPlayer(parseInt(sourcePlayerId), issue.expectedSeasonId);
+  if (newPlayerId) {
+    Toast.show(I18n.t('audit_destination_player_created'));
+    Sync.scheduleAutoSync();
+    await renderSeasonAuditResults();
+  } else {
+    Toast.error(I18n.t('audit_err_create_player_failed'));
+  }
 }
 
 function seasonAuditSelectAll(select) {
