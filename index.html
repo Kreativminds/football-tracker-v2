@@ -5254,7 +5254,7 @@ const TR = {
     games_no_home_ground_set:'No Home Ground set for this season yet. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Set one in Settings</a> to auto-fill this field next time.',
     set_lbl_home_ground:'Home Ground',
     set_lbl_age_group:'Age Group',
-    set_lbl_club_name:'Club Name',
+    set_lbl_club_name:'Club Name', set_lbl_club_logo:'Club Logo URL',
     set_lbl_shirt_color:'Team Shirt Colour',
     set_shirt_color_hint:'(optional — defaults to brand maroon)',
     set_btn_use_default:'Use Default',
@@ -6398,7 +6398,7 @@ const TR = {
     games_no_home_ground_set:'Ainda não definiu o Recinto desta época. <a href="#" onclick="event.preventDefault();Nav.go(\'settings\')" style="color:var(--black);font-weight:700">Defina um nas Definições</a> para preencher automaticamente da próxima vez.',
     set_lbl_home_ground:'Recinto',
     set_lbl_age_group:'Escalão',
-    set_lbl_club_name:'Nome do Clube',
+    set_lbl_club_name:'Nome do Clube', set_lbl_club_logo:'URL do Logótipo do Clube',
     set_lbl_shirt_color:'Cor da Camisola da Equipa',
     set_shirt_color_hint:'(opcional — por defeito usa o maroon da marca)',
     set_btn_use_default:'Usar Padrão',
@@ -9472,10 +9472,10 @@ async function renderSeasonHeader(season, status) {
   const cfg = statusConfig[status] || statusConfig.active;
 
   const metaLine = [];
-  if (clubTeam?.city || clubTeam?.country) metaLine.push(`&#128205; ${esc([clubTeam.city, clubTeam.country].filter(Boolean).join(', '))}`);
+  if (clubTeam?.city || clubTeam?.country) metaLine.push(`<span>&#128205; ${esc([clubTeam.city, clubTeam.country].filter(Boolean).join(', '))}</span>`);
   if (clubTeam?.foundedYear || clubTeam?.foundationDate) {
     const year = clubTeam.foundedYear || (clubTeam.foundationDate||'').slice(0,4);
-    if (year) metaLine.push(`&#128197; ${I18n.t('home_header_founded', {year: esc(year)})}`);
+    if (year) metaLine.push(`<span>&#128197; ${I18n.t('home_header_founded', {year: esc(year)})}</span>`);
   }
 
   return `
@@ -9490,9 +9490,9 @@ async function renderSeasonHeader(season, status) {
         }
       </div>
       <div style="flex:1;min-width:0;color:#fff">
-        <div style="font-weight:800;font-size:19px;letter-spacing:.3px">${esc((clubTeam?.name || season.clubName || '').toUpperCase())}</div>
-        <div style="font-size:13px;opacity:.85;margin-top:2px">${season.ageGroup?esc(season.ageGroup)+' · ':''}${esc(season.seasonName||'')}</div>
-        ${metaLine.length ? `<div style="font-size:11px;opacity:.75;margin-top:6px;display:flex;gap:12px;flex-wrap:wrap">${metaLine.join('')}</div>` : ''}
+        <div style="font-weight:800;font-size:17px;letter-spacing:.3px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc((clubTeam?.name || season.clubName || '').toUpperCase())}</div>
+        <div style="font-size:13px;opacity:.85;margin-top:3px">${season.ageGroup?esc(season.ageGroup)+' · ':''}${esc(season.seasonName||'')}</div>
+        ${metaLine.length ? `<div style="font-size:11px;opacity:.75;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${metaLine.join('')}</div>` : ''}
       </div>
       <span class="badge" style="background:${cfg.bg};color:${cfg.color};flex-shrink:0;font-weight:700;backdrop-filter:blur(2px)">${cfg.label}</span>
     </div>
@@ -9514,17 +9514,17 @@ async function renderHomeSetupView(season) {
   <div class="card">
     <div class="card-title">${I18n.t('home_setup_title')}</div>
     <div class="stat-grid">
-      <div><div class="stat-label">${I18n.t('home_setup_start_date')}</div><div class="stat-value" style="font-size:15px">${season.startYear ? season.startYear + '-09-01' : '—'}</div></div>
-      <div><div class="stat-label">${I18n.t('home_setup_squad_size')}</div><div class="stat-value" style="font-size:15px">${activePlayers.length}</div></div>
+      <div class="stat-card"><div class="val">${season.startYear ? season.startYear + '-09-01' : '—'}</div><div class="lbl">${I18n.t('home_setup_start_date')}</div></div>
+      <div class="stat-card"><div class="val">${activePlayers.length}</div><div class="lbl">${I18n.t('home_setup_squad_size')}</div></div>
     </div>
   </div>
 
   ${tasks.length ? `
   <div class="card">
     <div class="card-title">${I18n.t('home_setup_missing_tasks')}</div>
-    ${tasks.map(t => `<div class="row" style="cursor:pointer" onclick="${t.action}">
-      <span class="row-name">${esc(t.label)}</span>
-      <span class="row-meta">›</span>
+    ${tasks.map(t => `<div class="info-row" style="cursor:pointer" onclick="${t.action}">
+      <span class="ir-label">${esc(t.label)}</span>
+      <span class="ir-value">›</span>
     </div>`).join('')}
   </div>` : `
   <div class="card" style="text-align:center;padding:24px">
@@ -9612,22 +9612,22 @@ async function renderHomeCompletedView(season) {
   <div class="card">
     <div class="card-title">${I18n.t('home_completed_at_a_glance')}</div>
     <div class="stat-grid">
-      ${season.seasonSummary?.position ? `<div><div class="stat-label">${I18n.t('home_completed_final_position')}</div><div class="stat-value">${esc(String(season.seasonSummary.position))}</div></div>` : ''}
-      <div><div class="stat-label">${I18n.t('dash_played')}</div><div class="stat-value">${stats.played}</div></div>
-      <div><div class="stat-label">${I18n.t('dash_won')}</div><div class="stat-value">${stats.wins}</div></div>
-      <div><div class="stat-label">${I18n.t('dash_drawn')}</div><div class="stat-value">${stats.draws}</div></div>
-      <div><div class="stat-label">${I18n.t('dash_lost')}</div><div class="stat-value">${stats.losses}</div></div>
-      <div><div class="stat-label">${I18n.t('dash_goals_for')}</div><div class="stat-value">${stats.goalsFor}</div></div>
-      <div><div class="stat-label">${I18n.t('dash_goals_against')}</div><div class="stat-value">${stats.goalsAgainst}</div></div>
-      <div><div class="stat-label">${I18n.t('home_completed_goal_diff')}</div><div class="stat-value">${stats.goalDiff>0?'+':''}${stats.goalDiff}</div></div>
+      ${season.seasonSummary?.position ? `<div class="stat-card"><div class="val">${esc(String(season.seasonSummary.position))}</div><div class="lbl">${I18n.t('home_completed_final_position')}</div></div>` : ''}
+      <div class="stat-card"><div class="val">${stats.played}</div><div class="lbl">${I18n.t('dash_played')}</div></div>
+      <div class="stat-card"><div class="val">${stats.wins}</div><div class="lbl">${I18n.t('dash_won')}</div></div>
+      <div class="stat-card"><div class="val">${stats.draws}</div><div class="lbl">${I18n.t('dash_drawn')}</div></div>
+      <div class="stat-card"><div class="val">${stats.losses}</div><div class="lbl">${I18n.t('dash_lost')}</div></div>
+      <div class="stat-card"><div class="val">${stats.goalsFor}</div><div class="lbl">${I18n.t('dash_goals_for')}</div></div>
+      <div class="stat-card"><div class="val">${stats.goalsAgainst}</div><div class="lbl">${I18n.t('dash_goals_against')}</div></div>
+      <div class="stat-card"><div class="val">${stats.goalDiff>0?'+':''}${stats.goalDiff}</div><div class="lbl">${I18n.t('home_completed_goal_diff')}</div></div>
     </div>
   </div>
 
   ${(firstMatch || lastMatch) ? `
   <div class="card">
     <div class="card-title">${I18n.t('home_completed_timeline')}</div>
-    ${firstMatch ? `<div class="row"><span class="row-name">${I18n.t('home_completed_first_match')}</span><span class="row-meta">${fmtDate(firstMatch.date)} · ${esc(firstMatch.opponent)}</span></div>` : ''}
-    ${lastMatch ? `<div class="row"><span class="row-name">${I18n.t('home_completed_last_match')}</span><span class="row-meta">${fmtDate(lastMatch.date)} · ${esc(lastMatch.opponent)}</span></div>` : ''}
+    ${firstMatch ? `<div class="info-row"><span class="ir-label">${I18n.t('home_completed_first_match')}</span><span class="ir-value">${fmtDate(firstMatch.date)} · ${esc(firstMatch.opponent)}</span></div>` : ''}
+    ${lastMatch ? `<div class="info-row"><span class="ir-label">${I18n.t('home_completed_last_match')}</span><span class="ir-value">${fmtDate(lastMatch.date)} · ${esc(lastMatch.opponent)}</span></div>` : ''}
   </div>` : ''}
 
   ${finalThree.length ? `
@@ -9655,9 +9655,9 @@ async function renderHomeCompletedView(season) {
   <div class="card">
     <div class="card-title">${I18n.t('home_completed_historical_squad')}</div>
     <div class="stat-grid">
-      <div><div class="stat-label">${I18n.t('home_completed_squad_size')}</div><div class="stat-value">${activePlayers.length}</div></div>
-      ${previousSeason ? `<div><div class="stat-label">${I18n.t('home_completed_returning')}</div><div class="stat-value">${returningCount}</div></div>
-      <div><div class="stat-label">${I18n.t('home_completed_new_players')}</div><div class="stat-value">${newCount}</div></div>` : ''}
+      <div class="stat-card"><div class="val">${activePlayers.length}</div><div class="lbl">${I18n.t('home_completed_squad_size')}</div></div>
+      ${previousSeason ? `<div class="stat-card"><div class="val">${returningCount}</div><div class="lbl">${I18n.t('home_completed_returning')}</div></div>
+      <div class="stat-card"><div class="val">${newCount}</div><div class="lbl">${I18n.t('home_completed_new_players')}</div></div>` : ''}
     </div>
     <button class="btn btn-secondary btn-sm" style="margin-top:10px" onclick="Nav.go('squad')">${I18n.t('home_completed_view_squad')}</button>
   </div>
@@ -9665,15 +9665,15 @@ async function renderHomeCompletedView(season) {
   ${hasAnyStats ? `
   <div class="card">
     <div class="card-title">${I18n.t('home_completed_player_highlights')}</div>
-    ${mostApps ? `<div class="row"><span class="row-name">${I18n.t('home_completed_most_apps')}</span><span class="row-meta">${esc(mostApps.names.join(', '))} (${mostApps.value})</span></div>` : ''}
-    ${topScorer ? `<div class="row"><span class="row-name">${I18n.t('home_completed_top_scorer')}</span><span class="row-meta">${esc(topScorer.names.join(', '))} (${topScorer.value})</span></div>` : ''}
-    ${topAssists ? `<div class="row"><span class="row-name">${I18n.t('home_completed_most_assists')}</span><span class="row-meta">${esc(topAssists.names.join(', '))} (${topAssists.value})</span></div>` : ''}
+    ${mostApps ? `<div class="info-row"><span class="ir-label">${I18n.t('home_completed_most_apps')}</span><span class="ir-value">${esc(mostApps.names.join(', '))} (${mostApps.value})</span></div>` : ''}
+    ${topScorer ? `<div class="info-row"><span class="ir-label">${I18n.t('home_completed_top_scorer')}</span><span class="ir-value">${esc(topScorer.names.join(', '))} (${topScorer.value})</span></div>` : ''}
+    ${topAssists ? `<div class="info-row"><span class="ir-label">${I18n.t('home_completed_most_assists')}</span><span class="ir-value">${esc(topAssists.names.join(', '))} (${topAssists.value})</span></div>` : ''}
   </div>` : ''}
 
   ${achievements.length ? `
   <div class="card" style="background:#faf7f0;border-color:#e2d9c4">
     <div class="card-title">${I18n.t('home_completed_achievements')}</div>
-    ${achievements.map(a => `<div class="row"><span class="row-name">&#127942; ${esc(a.title)}</span><span class="row-meta">${a.date?fmtDate(a.date):''}</span></div>`).join('')}
+    ${achievements.map(a => `<div class="info-row"><span class="ir-label">&#127942; ${esc(a.title)}</span><span class="ir-value">${a.date?fmtDate(a.date):''}</span></div>`).join('')}
   </div>` : ''}
 
   <div class="card" style="text-align:center">
@@ -14494,6 +14494,7 @@ const Render = (() => {
                 <div style="font-size:11px;color:var(--muted);margin-top:4px">${I18n.t('set_season_name_preview')} <strong id="sf-edit-name-preview" style="color:var(--dark)">${esc(State.currentSeason?.seasonName||'')}</strong></div>
               </div>
               <div class="form-group"><label>${I18n.t('set_lbl_club_name')} *</label><input id="sf-edit-club" type="text" placeholder="e.g. SL Olivais" value="${esc(State.currentSeason?.clubName||'')}"></div>
+              <div class="form-group"><label>${I18n.t('set_lbl_club_logo')}</label><input id="sf-edit-club-logo" type="text" placeholder="https://..." value="${esc((await DB.get('clubTeams', State.currentSeason?.clubTeamId))?.logoUrl||'')}"></div>
               <div class="form-group"><label>Home Ground</label><input id="sf-edit-homeground" type="text" placeholder="e.g. Campo SL Olivais" value="${esc(State.currentSeason?.homeGround||'')}"></div>
               <div class="form-group"><label>Age Group</label>${renderAgeGroupField('sf-edit-age', 'sf-edit-age-other', State.currentSeason?.ageGroup||'')}</div>
               <div class="form-group"><label>${I18n.t('set_lbl_shirt_color')} <span style="font-size:10px;font-weight:400;color:#999">${I18n.t('set_shirt_color_hint')}</span></label>
@@ -17970,6 +17971,15 @@ document.addEventListener('click', async e => {
     let editClubTeamId = existingClubTeams.find(c => normalize(c.name) === normalize(editClubName))?.clubTeamId;
     if (!editClubTeamId) {
       editClubTeamId = await DB.put('clubTeams', { name: editClubName, createdAt: new Date().toISOString() });
+    }
+
+    // Save the club logo URL to the actual clubTeams record — the real
+    // missing piece, confirmed tonight, that meant there was previously
+    // no way to ever set a logo for a club at all.
+    const editLogoUrl = document.getElementById('sf-edit-club-logo')?.value.trim() || null;
+    const clubTeamRecord = await DB.get('clubTeams', editClubTeamId);
+    if (clubTeamRecord && clubTeamRecord.logoUrl !== editLogoUrl) {
+      await DB.put('clubTeams', { ...clubTeamRecord, logoUrl: editLogoUrl });
     }
 
     const editShirtInput = document.getElementById('sf-edit-shirtcolor');
