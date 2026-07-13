@@ -11078,11 +11078,16 @@ async function renderPlayerClubHistory(playerId) {
   // direct playerId match for any entry created before this fix, so
   // nothing existing silently disappears.
   const allClubHistory = await DB.getAll('clubHistory');
+  if (typeof gdDebugLog === 'function') {
+    gdDebugLog(`[ClubHistory] playerId=${playerId}, player.careerPlayerId=${player.careerPlayerId}, total clubHistory rows fetched=${allClubHistory.length}`);
+    allClubHistory.forEach(c => gdDebugLog(`[ClubHistory] row: clubHistoryId=${c.clubHistoryId}, playerId=${c.playerId}, careerPlayerId=${c.careerPlayerId}, isDeleted=${c.isDeleted}`));
+  }
   const all = allClubHistory.filter(c => {
     if (!c.playerId) return true; // legacy entries with no playerId at all
     if (c.careerPlayerId && player.careerPlayerId) return c.careerPlayerId === player.careerPlayerId;
     return c.playerId === playerId; // fallback for entries never migrated
   });
+  if (typeof gdDebugLog === 'function') gdDebugLog(`[ClubHistory] matched ${all.length} row(s) after filtering`);
   all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
 
   el.innerHTML = `
