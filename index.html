@@ -11070,7 +11070,19 @@ async function renderPlayerClubHistory(playerId) {
   const player = players.find(p => p.playerId === playerId);
   if (!player) return;
 
-  const all = (await DB.getAll('clubHistory')).filter(c => !c.playerId || c.playerId === playerId);
+  // Club History must follow the real person across every season, not
+  // just the one season-row it happened to be created under — a real
+  // gap found tonight, since clubHistory.playerId previously only ever
+  // matched one specific season's local player ID. Resolve the actual
+  // career identity first, then match on that; still falls back to a
+  // direct playerId match for any entry created before this fix, so
+  // nothing existing silently disappears.
+  const allClubHistory = await DB.getAll('clubHistory');
+  const all = allClubHistory.filter(c => {
+    if (!c.playerId) return true; // legacy entries with no playerId at all
+    if (c.careerPlayerId && player.careerPlayerId) return c.careerPlayerId === player.careerPlayerId;
+    return c.playerId === playerId; // fallback for entries never migrated
+  });
   all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
 
   el.innerHTML = `
@@ -11233,8 +11245,10 @@ async function saveClubHistoryEntry(playerId) {
   const clubName = g('cf-club').trim();
   if (!clubName) { Toast.error(I18n.t('ch_err_club_required')); return; }
   const existingId = g('cf-id');
+  const currentPlayer = await DB.get('players', playerId);
   const data = {
     playerId,
+    careerPlayerId: currentPlayer?.careerPlayerId || null,
     clubName,
     ageGroup: g('cf-age')||null,
     season: g('cf-season').trim()||null,
@@ -12430,9 +12444,15 @@ async function renderPlayerPortalClubs() {
   if (!el) return;
   const playerId = State.portalPlayerId;
   const player = await DB.get('players', playerId);
-  // clubHistory has no playerId index in IndexedDB — fetch everything and
-  // filter here, same pattern the working guardian Club History tab uses.
-  const all = (await DB.getAll('clubHistory')).filter(c => c.playerId === playerId);
+  // Same fix as the guardian-facing Club History tab: match by real
+  // careerPlayerId so history follows the person across seasons, not
+  // just the one season-row it was created under.
+  const allClubHistory = await DB.getAll('clubHistory');
+  const all = allClubHistory.filter(c => {
+    if (!c.playerId) return true;
+    if (c.careerPlayerId && player.careerPlayerId) return c.careerPlayerId === player.careerPlayerId;
+    return c.playerId === playerId;
+  });
   all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
 
   el.innerHTML = `
