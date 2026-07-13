@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NextEleven</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -915,7 +918,7 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 // CONFIG
 // ══════════════════════════════════════════════════════════════════════════════
 const CONFIG = {
-  APP_VERSION: '1.2.0',
+  APP_VERSION: '1.2.1',
   SCHEMA_VERSION: 14,
   DB_NAME: 'footballSquadTrackerDB',
   MAX_BACKUPS: 30,
@@ -2919,6 +2922,56 @@ async function runSilentIntegrityCheck() {
   } catch (e) {
     console.error('[Integrity] Silent check failed:', e);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// STALE-BUILD DETECTION
+// ══════════════════════════════════════════════════════════════════════════
+// The real, direct fix for browsers silently serving cached JavaScript
+// after a deployment (confirmed tonight: a genuine bug fix sat completely
+// inert on a real device until the Parent manually cleared their cache —
+// something no user should ever need to know how to do). Fetches a tiny,
+// separate version.json with cache explicitly disabled at the fetch call
+// itself (the one mechanism that reliably bypasses stale caching, unlike
+// HTML meta tags, which mobile browsers honor inconsistently). If the
+// deployed version is newer than what's actually running, shows a clear,
+// one-tap banner offering a real, forced reload — never silent, never
+// requiring the Parent to know anything about browser caching at all.
+async function checkForStaleVersion() {
+  try {
+    const res = await fetch('version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const remote = await res.json();
+    if (remote.version && remote.version !== CONFIG.APP_VERSION) {
+      showStaleVersionBanner(remote.version);
+    }
+  } catch (e) {
+    // Silent failure — if this check itself can't run (offline, etc.),
+    // that's not a reason to interrupt the Parent; the app continues
+    // working with whatever version is actually loaded.
+  }
+}
+
+function showStaleVersionBanner(newVersion) {
+  if (document.getElementById('staleVersionBanner')) return; // never show twice
+  const banner = document.createElement('div');
+  banner.id = 'staleVersionBanner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#1a1a2e;color:#fff;padding:10px 16px;font-size:13px;font-weight:700;z-index:9999;display:flex;justify-content:space-between;align-items:center;gap:10px';
+  banner.innerHTML = `
+    <span>A newer version is available.</span>
+    <button type="button" style="background:#B23333;color:#fff;border:none;padding:6px 14px;border-radius:4px;font-weight:700;cursor:pointer" onclick="forceReloadForUpdate()">Update Now</button>
+  `;
+  document.body.prepend(banner);
+}
+
+function forceReloadForUpdate() {
+  // location.reload(true) is deprecated and unreliable on modern mobile
+  // browsers; appending a real cache-busting query param to the URL and
+  // navigating there directly is what actually forces a genuine
+  // re-fetch rather than risking another cached response.
+  const url = new URL(window.location.href);
+  url.searchParams.set('_v', Date.now());
+  window.location.href = url.toString();
 }
 
 async function scanDatabaseIntegrity() {
@@ -17700,9 +17753,10 @@ async function continueAppLoadAfterLogin() {
     attachEvents();
     await buildTrackedNav();
     await initAdmin();
-    if (await isDebugModeOn()) { ensureDebugPanel(); gdDebugLog('App loaded — debug mode active'); gdDebugLog('BUILD MARKER: 2026-07-05-2200-pin-debug'); }
+    if (await isDebugModeOn()) { ensureDebugPanel(); gdDebugLog('App loaded — debug mode active'); gdDebugLog('APP VERSION: ' + CONFIG.APP_VERSION); }
     Sync.startPeriodicSync();
     await runSilentIntegrityCheck();
+    checkForStaleVersion();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
