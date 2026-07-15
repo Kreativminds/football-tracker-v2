@@ -368,9 +368,12 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
   .stat-grid{grid-template-columns:repeat(2,1fr)}
   .form-grid{grid-template-columns:1fr}
   table{min-width:500px}
-  .season-header-row{flex-direction:column;align-items:flex-start!important;gap:12px!important}
-  .season-header-badge{align-self:flex-start}
   .club-card-jersey{display:none}
+  .club-card-desktop-only{display:none}
+  .club-card-mobile-only{display:block}
+}
+@media(min-width:769px){
+  .club-card-mobile-only{display:none}
   /* Do NOT shrink .game-detail-table here — it needs its full natural width
      (set per-table via inline min-width, or the 760px base) so columns have
      room to render properly and the sticky columns + horizontal scroll work
@@ -9818,8 +9821,11 @@ async function renderClubCard(data) {
   if (data.squadCount != null) infoItems.push({ icon: '&#128101;', value: esc(String(data.squadCount)), label: I18n.t('cc_squad_players') });
   if (data.matchesCount != null) infoItems.push({ icon: '&#128197;', value: esc(String(data.matchesCount)), label: I18n.t('cc_season_matches') });
 
-  return `
-  <div style="position:relative;border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.18);margin-bottom:14px;background-image:${bgUrl ? `url('${esc(bgUrl)}')` : fallbackGradient};background-size:cover;background-position:center;background-repeat:no-repeat">
+  const cardBgStyle = `background-image:${bgUrl ? `url('${esc(bgUrl)}')` : fallbackGradient};background-size:cover;background-position:center;background-repeat:no-repeat`;
+
+  // ── DESKTOP — completely unchanged from before this mobile-only redesign ──
+  const desktopHtml = `
+  <div class="club-card-desktop-only" style="position:relative;border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.18);margin-bottom:14px;${cardBgStyle}">
     <div style="position:absolute;inset:0;background:rgba(10,10,20,0.15)"></div>
     <div class="season-header-row" style="position:relative;display:flex;align-items:center;gap:16px;padding:20px">
       <div style="width:64px;height:64px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.25)">
@@ -9848,6 +9854,49 @@ async function renderClubCard(data) {
       </div>` : ''}
     </div>` : ''}
   </div>`;
+
+  // ── MOBILE — new, compact layout per the approved redesign spec.
+  // Same colours/typography/shadows/radius/logo/icons/buttons as
+  // desktop — only the arrangement and spacing are different, to
+  // genuinely reduce vertical height rather than just look different.
+  const squadVal = data.squadCount != null ? String(data.squadCount) : '—';
+  const matchesVal = data.matchesCount != null ? String(data.matchesCount) : '—';
+  const mobileHtml = `
+  <div class="club-card-mobile-only" style="position:relative;border-radius:8px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.18);margin-bottom:14px;${cardBgStyle}">
+    <div style="position:absolute;inset:0;background:rgba(10,10,20,0.15)"></div>
+    <div style="position:relative;padding:11px 14px 10px">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="width:52px;height:52px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.25)">
+          ${logoUrl
+            ? `<img src="${esc(logoUrl)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+               <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;font-size:20px">&#9917;</div>`
+            : `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:20px">&#9917;</div>`
+          }
+        </div>
+        <div style="flex:1;min-width:0;color:#fff">
+          <div style="font-weight:800;font-size:15px;letter-spacing:.2px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+            ${esc((data.clubName || '').toUpperCase())}${data.ageGroup?' · '+esc(data.ageGroup):''} · <span style="font-weight:600">${esc(data.seasonName||'')}</span>
+          </div>
+        </div>
+        ${cfg ? `<span class="badge" style="background:${cfg.bg};color:${cfg.color};font-weight:700;backdrop-filter:blur(2px);flex-shrink:0;font-size:10px;padding:2px 7px">${cfg.label}</span>` : ''}
+      </div>
+
+      ${metaLine.length ? `<div style="font-size:11px;opacity:.8;color:#fff;margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">${metaLine.join('<span style="opacity:.5">|</span>')}</div>` : ''}
+
+      ${data.leagueDivision ? `<div style="font-size:11px;opacity:.85;color:#fff;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><strong>${I18n.t('cc_league_division')}:</strong> ${esc(data.leagueDivision)}</div>` : ''}
+    </div>
+
+    <div style="position:relative;height:1px;background:rgba(255,255,255,.18);margin:0 14px"></div>
+
+    <div style="position:relative;padding:10px 14px;display:flex;align-items:center;gap:10px">
+      <div style="text-align:center;flex:1"><div style="font-weight:800;font-size:15px;color:#fff">${esc(squadVal)}</div><div style="font-size:9px;opacity:.7;color:#fff;text-transform:uppercase">${I18n.t('cc_squad_players')}</div></div>
+      <div style="text-align:center;flex:1"><div style="font-weight:800;font-size:15px;color:#fff">${esc(matchesVal)}</div><div style="font-size:9px;opacity:.7;color:#fff;text-transform:uppercase">${I18n.t('cc_season_matches')}</div></div>
+      ${data.onViewTeam ? `<button class="btn btn-secondary btn-sm" onclick="${esc(data.onViewTeam)}" style="flex:1;padding:6px 8px;font-size:11px;background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.25)">${I18n.t('cc_btn_view_team')}</button>` : ''}
+      ${data.onViewFixtures ? `<button class="btn btn-primary btn-sm" onclick="${esc(data.onViewFixtures)}" style="flex:1;padding:6px 8px;font-size:11px">${I18n.t('cc_btn_view_fixtures')}</button>` : ''}
+    </div>
+  </div>`;
+
+  return desktopHtml + mobileHtml;
 }
 
 // Thin adapter — resolves the real season/club/game data this app
