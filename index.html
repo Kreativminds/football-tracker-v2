@@ -9602,9 +9602,20 @@ async function applyDynamicBrandingToDocument() {
   const mainLogo = await getBrandingAsset('mainLogo');
   if (mainLogo) {
     document.querySelectorAll('.nav-logo-mark').forEach(el => {
+      // A real background needed behind a likely-transparent logo PNG —
+      // otherwise it blends into the dark navy container and becomes
+      // hard to see, exactly the real problem reported. 'contain' (not
+      // 'cover') so the full logo shows, never cropped/zoomed, with a
+      // small padding via background-origin so it doesn't touch the
+      // rounded corners edge-to-edge.
+      el.style.background = '#fff';
       el.style.backgroundImage = `url('${mainLogo}')`;
-      el.style.backgroundSize = 'cover';
+      el.style.backgroundSize = 'contain';
+      el.style.backgroundRepeat = 'no-repeat';
       el.style.backgroundPosition = 'center';
+      el.style.padding = '3px';
+      el.style.backgroundOrigin = 'content-box';
+      el.style.backgroundClip = 'content-box';
       const span = el.querySelector('span');
       if (span) span.style.visibility = 'hidden'; // keep layout size, hide the "11" text mark
     });
