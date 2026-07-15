@@ -3606,13 +3606,16 @@ async function renderShareTeamCard() {
     }
 
     const url = buildTeamShareUrl(existing.share_token);
+    const nameMode = existing.show_name_mode || 'first_last';
+    const showStats = existing.show_player_stats === true;
+    const previewName = nameMode === 'hidden' ? I18n.t('set_share_preview_hidden_example') : nameMode === 'initials' ? 'L. Mabere' : 'Lorenzo Mabere';
     return `<div class="card" style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div style="font-weight:700;font-size:13px">${esc(season.seasonName)}${isCurrent?` <span class="pos-pill">${I18n.t('set_share_current_badge')}</span>`:''}</div>
         <div style="font-size:11px;color:var(--muted)">${existing.enabled ? I18n.t('set_share_status_active') : I18n.t('set_share_status_disabled')}</div>
       </div>
       <div style="font-size:12px;word-break:break-all;background:var(--bg,#f2f4f7);padding:8px 10px;border-radius:4px;margin-bottom:10px">${esc(url)}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">
         <button class="btn btn-secondary btn-sm" onclick="handleCopyShareLink('${esc(url)}')">${I18n.t('set_share_btn_copy')}</button>
         <button class="btn btn-secondary btn-sm" onclick="window.open('${esc(url)}','_blank','noopener,noreferrer')">${I18n.t('set_share_btn_open')}</button>
         ${existing.enabled
@@ -3620,6 +3623,36 @@ async function renderShareTeamCard() {
           : `<button class="btn btn-secondary btn-sm" onclick="handleToggleShareLink(${season.seasonId}, true)">${I18n.t('set_share_btn_enable')}</button>`
         }
         <button class="btn btn-danger btn-sm" onclick="handleRegenerateShareLink(${season.seasonId})">${I18n.t('set_share_btn_regenerate')}</button>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">${I18n.t('set_share_privacy_title')}</div>
+
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px">${I18n.t('set_share_name_visibility')}</div>
+        <div id="nameModeGroup-${season.seasonId}" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">
+          ${[
+            {v:'first_last', l:I18n.t('set_share_name_full'), ex:'Lorenzo Mabere'},
+            {v:'initials',   l:I18n.t('set_share_name_initials'), ex:'L. Mabere'},
+            {v:'hidden',     l:I18n.t('set_share_name_hidden_opt'), ex:I18n.t('set_share_preview_hidden_example')},
+          ].map(opt => `
+            <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid ${nameMode===opt.v?'var(--navy)':'var(--border)'};border-radius:6px;cursor:pointer;min-height:44px;background:${nameMode===opt.v?'rgba(15,30,46,.04)':'transparent'}">
+              <input type="radio" name="nameMode-${season.seasonId}" value="${opt.v}" ${nameMode===opt.v?'checked':''} onchange="handlePrivacyPreviewUpdate(${season.seasonId})" style="width:18px;height:18px;flex-shrink:0">
+              <span style="flex:1;font-size:13px">${opt.l}</span>
+              <span style="font-size:11px;color:var(--muted)">${esc(opt.ex)}</span>
+            </label>`).join('')}
+        </div>
+
+        <label style="display:flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;margin-bottom:6px">
+          <input type="checkbox" id="showStats-${season.seasonId}" ${showStats?'checked':''} style="width:18px;height:18px;flex-shrink:0">
+          <span style="font-size:13px">${I18n.t('set_share_show_stats')}</span>
+        </label>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 12px">${I18n.t('set_share_stats_hint')}</p>
+
+        <div id="privacyPreview-${season.seasonId}" style="font-size:11px;background:var(--bg,#f2f4f7);padding:8px 10px;border-radius:4px;margin-bottom:10px">
+          ${I18n.t('set_share_preview_label')} <strong>${esc(previewName)}</strong> · ${showStats ? I18n.t('set_share_preview_stats_shown') : I18n.t('set_share_preview_stats_hidden')}
+        </div>
+
+        <button class="btn btn-primary btn-sm" id="savePrivacyBtn-${season.seasonId}" onclick="handleSaveSharePrivacy(${season.seasonId},this)">${I18n.t('common_save')}</button>
       </div>
     </div>`;
   }));
@@ -3665,6 +3698,34 @@ async function handleToggleShareLink(seasonId, enabled) {
     await renderShareTeamCard();
   } catch(err) {
     Toast.error(err.message);
+  }
+}
+
+function handlePrivacyPreviewUpdate(seasonId) {
+  const nameMode = document.querySelector(`input[name="nameMode-${seasonId}"]:checked`)?.value || 'first_last';
+  const showStats = document.getElementById(`showStats-${seasonId}`)?.checked || false;
+  const previewName = nameMode === 'hidden' ? I18n.t('set_share_preview_hidden_example') : nameMode === 'initials' ? 'L. Mabere' : 'Lorenzo Mabere';
+  const previewEl = document.getElementById(`privacyPreview-${seasonId}`);
+  if (previewEl) previewEl.innerHTML = `${I18n.t('set_share_preview_label')} <strong>${esc(previewName)}</strong> · ${showStats ? I18n.t('set_share_preview_stats_shown') : I18n.t('set_share_preview_stats_hidden')}`;
+  document.querySelectorAll(`#nameModeGroup-${seasonId} label`).forEach(lbl => {
+    const input = lbl.querySelector('input');
+    const selected = input && input.checked;
+    lbl.style.borderColor = selected ? 'var(--navy)' : 'var(--border)';
+    lbl.style.background = selected ? 'rgba(15,30,46,.04)' : 'transparent';
+  });
+}
+
+async function handleSaveSharePrivacy(seasonId, btn) {
+  const nameMode = document.querySelector(`input[name="nameMode-${seasonId}"]:checked`)?.value || 'first_last';
+  const showStats = document.getElementById(`showStats-${seasonId}`)?.checked || false;
+  if (btn) { btn.disabled = true; btn.textContent = I18n.t('common_saving'); }
+  try {
+    await Sync.updateTeamSharePrivacy(seasonId, nameMode, showStats);
+    Toast.show(I18n.t('set_share_privacy_saved'));
+    await renderShareTeamCard();
+  } catch(err) {
+    Toast.error(err.message);
+    if (btn) { btn.disabled = false; btn.textContent = I18n.t('common_save'); }
   }
 }
 
@@ -5309,6 +5370,12 @@ const TR = {
     set_share_loading:'Loading…', set_share_btn_generate:'Generate Link',
     set_share_status_active:'Active — visible to anyone with the link', set_share_status_disabled:'Disabled — link no longer works',
     set_share_btn_copy:'Copy Link', set_share_btn_open:'Open Team Page', set_share_btn_disable:'Disable', set_share_btn_enable:'Enable', set_share_btn_regenerate:'Regenerate',
+    set_share_privacy_title:'Privacy', set_share_name_visibility:'Player Names',
+    set_share_name_full:'Full names', set_share_name_initials:'Initials only', set_share_name_hidden_opt:'Hide names',
+    set_share_preview_hidden_example:'Player 1', set_share_show_stats:'Show player statistics',
+    set_share_stats_hint:'Goals, assists, appearances, top scorers and similar player-level stats. Team results always stay visible.',
+    set_share_preview_label:'Preview:', set_share_preview_stats_shown:'stats shown', set_share_preview_stats_hidden:'stats hidden',
+    set_share_privacy_saved:'Privacy settings saved.',
     set_share_generated:'Share link ready.', set_share_enabled_toast:'Link enabled.', set_share_disabled_toast:'Link disabled.',
     set_share_copied:'Link copied.', set_share_copy_failed:'Could not copy — long-press the link above to copy it manually.',
     set_share_confirm_regen_title:'Replace share link?', set_share_confirm_regen_body:'The current link will stop working immediately. Anyone who had it will need the new one.',
@@ -6474,6 +6541,12 @@ const TR = {
     set_share_loading:'A carregar…', set_share_btn_generate:'Gerar Link',
     set_share_status_active:'Ativo — visível a quem tiver o link', set_share_status_disabled:'Desativado — o link já não funciona',
     set_share_btn_copy:'Copiar Link', set_share_btn_open:'Abrir Página de Equipa', set_share_btn_disable:'Desativar', set_share_btn_enable:'Ativar', set_share_btn_regenerate:'Regenerar',
+    set_share_privacy_title:'Privacidade', set_share_name_visibility:'Nomes dos Jogadores',
+    set_share_name_full:'Nomes completos', set_share_name_initials:'Apenas iniciais', set_share_name_hidden_opt:'Ocultar nomes',
+    set_share_preview_hidden_example:'Jogador 1', set_share_show_stats:'Mostrar estatísticas de jogadores',
+    set_share_stats_hint:'Golos, assistências, presenças, melhores marcadores e estatísticas semelhantes por jogador. Os resultados da equipa mantêm-se sempre visíveis.',
+    set_share_preview_label:'Pré-visualização:', set_share_preview_stats_shown:'estatísticas visíveis', set_share_preview_stats_hidden:'estatísticas ocultas',
+    set_share_privacy_saved:'Definições de privacidade guardadas.',
     set_share_generated:'Link pronto.', set_share_enabled_toast:'Link ativado.', set_share_disabled_toast:'Link desativado.',
     set_share_copied:'Link copiado.', set_share_copy_failed:'Não foi possível copiar — mantenha premido o link acima para copiar manualmente.',
     set_share_confirm_regen_title:'Substituir link de partilha?', set_share_confirm_regen_body:'O link atual deixa de funcionar imediatamente. Quem o tinha vai precisar do novo.',
@@ -16083,6 +16156,25 @@ const Sync = (() => {
     return await res.json(); // the raw token string
   }
 
+  async function updateTeamSharePrivacy(seasonId, showNameMode, showPlayerStats) {
+    if (!isConfigured()) throw new Error('Sync not configured.');
+    if (!Auth.isLoggedIn()) throw new Error('Not logged in.');
+    const base = _cfg.url.replace(/\/rest\/v1\/?$/, '').replace(/\/$/, '') + '/rest/v1/';
+    const res = await fetch(base + 'rpc/update_team_share_privacy', {
+      method: 'POST',
+      headers: {
+        'apikey':        _cfg.anonKey,
+        'Authorization': 'Bearer ' + Auth.getAccessToken(),
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ p_season_id: seasonId, p_show_name_mode: showNameMode, p_show_player_stats: showPlayerStats }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error('Could not update privacy settings: ' + res.status + ' ' + err.slice(0,200));
+    }
+  }
+
   async function setTeamShareEnabled(seasonId, enabled) {
     if (!isConfigured()) throw new Error('Sync not configured.');
     if (!Auth.isLoggedIn()) throw new Error('Not logged in.');
@@ -16652,7 +16744,7 @@ const Sync = (() => {
     }
   }
 
-  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote, fetchOwnProfile, claimAccountCode, generateTeamShareLink, setTeamShareEnabled, getTeamShareLink, getRestoredLogHtml, scheduleAutoSync, startPeriodicSync, supabaseRequest };
+  return { loadConfig, saveConfig, testConnection, run, uploadAll, downloadAll, resetLocalCloudIds, supabaseDelete, getPendingCount, getStatus, updateSyncUI, log, isConfigured, getRawConfig, storeToTable, validatePlayerPinRemote, bootstrapPlayerFromRemote, fetchOwnProfile, claimAccountCode, generateTeamShareLink, setTeamShareEnabled, updateTeamSharePrivacy, getTeamShareLink, getRestoredLogHtml, scheduleAutoSync, startPeriodicSync, supabaseRequest };
 })();
 
 function attachEvents() {
