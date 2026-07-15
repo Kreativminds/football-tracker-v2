@@ -5286,6 +5286,9 @@ const TR = {
     set_branding_title:'Branding', set_branding_intro:'Manage NextEleven application branding — logo, icons, and default backgrounds. These are completely separate from Club logos, which are managed per season. Changes sync across every device.',
     set_branding_main_logo:'NextEleven Main Logo', set_branding_app_icon:'App Icon', set_branding_favicon:'Favicon',
     set_branding_team_header_bg:'Default Team Page Header Background', set_branding_club_card_bg:'Club Card Background', set_branding_jersey_placeholder:'Jersey Image', set_branding_splash:'Splash Screen',
+    set_branding_reserved:'Reserved for future use',
+    set_branding_banner_alt:'Banner (Alternate)', set_branding_jersey_back:'Jersey (Back)', set_branding_jersey_on_pitch:'Jersey on Pitch',
+    set_branding_pitch_background:'Pitch Background', set_branding_club_logo_placeholder:'Club Logo Placeholder', set_branding_player_photo_placeholder:'Player Photo Placeholder',
     set_branding_login_welcome:'Login &amp; Welcome Screen Image', set_branding_pdf_cover:'PDF Cover Page',
     set_branding_player_cv_bg:'Player CV Background', set_branding_default:'Default', set_branding_restore_default:'Restore Default',
     set_branding_saved:'Saved.', set_branding_restored:'Restored to default.', set_branding_err_https:'Please use a valid https:// URL.',
@@ -6448,6 +6451,9 @@ const TR = {
     set_branding_title:'Marca', set_branding_intro:'Gira a marca da aplicação NextEleven — logótipo, ícones e fundos por defeito. Estas definições são completamente separadas dos logótipos de Clube, que são geridos por época. As alterações sincronizam em todos os dispositivos.',
     set_branding_main_logo:'Logótipo Principal do NextEleven', set_branding_app_icon:'Ícone da Aplicação', set_branding_favicon:'Favicon',
     set_branding_team_header_bg:'Fundo por Defeito do Cabeçalho da Equipa', set_branding_club_card_bg:'Fundo do Cartão do Clube', set_branding_jersey_placeholder:'Imagem da Camisola', set_branding_splash:'Ecrã de Abertura',
+    set_branding_reserved:'Reservado para uso futuro',
+    set_branding_banner_alt:'Banner (Alternativo)', set_branding_jersey_back:'Camisola (Costas)', set_branding_jersey_on_pitch:'Camisola no Campo',
+    set_branding_pitch_background:'Fundo de Campo', set_branding_club_logo_placeholder:'Imagem de Logótipo de Clube', set_branding_player_photo_placeholder:'Imagem de Fotografia de Jogador',
     set_branding_login_welcome:'Imagem de Login e Boas-vindas', set_branding_pdf_cover:'Página de Capa do PDF',
     set_branding_player_cv_bg:'Fundo do CV do Jogador', set_branding_default:'Padrão', set_branding_restore_default:'Restaurar Padrão',
     set_branding_saved:'Guardado.', set_branding_restored:'Restaurado para o padrão.', set_branding_err_https:'Por favor use um URL https:// válido.',
@@ -9636,6 +9642,15 @@ const BRANDING_ASSET_DEFS = [
   { key: 'loginWelcomeImage', labelKey: 'set_branding_login_welcome' },
   { key: 'pdfCover', labelKey: 'set_branding_pdf_cover' },
   { key: 'playerCvBackground', labelKey: 'set_branding_player_cv_bg' },
+  // Reserved for future features — not used by any page yet, but given
+  // a real, permanent, saved home per Victor's explicit request, rather
+  // than being left unmanaged in Storage with no UI to see or edit them.
+  { key: 'bannerAlt', labelKey: 'set_branding_banner_alt', reserved: true },
+  { key: 'jerseyBack', labelKey: 'set_branding_jersey_back', reserved: true },
+  { key: 'jerseyOnPitch', labelKey: 'set_branding_jersey_on_pitch', reserved: true },
+  { key: 'pitchBackground', labelKey: 'set_branding_pitch_background', reserved: true },
+  { key: 'clubLogoPlaceholder', labelKey: 'set_branding_club_logo_placeholder', reserved: true },
+  { key: 'playerPhotoPlaceholder', labelKey: 'set_branding_player_photo_placeholder', reserved: true },
 ];
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -9704,7 +9719,7 @@ async function renderBrandingAssetFields() {
     const currentUrl = branding[def.key] || '';
     return `
     <div class="card" style="margin-bottom:12px">
-      <div class="card-title" style="margin-top:0">${I18n.t(def.labelKey)}</div>
+      <div class="card-title" style="margin-top:0;display:flex;align-items:center;gap:8px">${I18n.t(def.labelKey)}${def.reserved ? `<span class="badge" style="background:#f0f0f0;color:var(--muted);font-size:9px;font-weight:700;text-transform:none">${I18n.t('set_branding_reserved')}</span>` : ''}</div>
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap">
         <div style="width:110px;height:110px;border-radius:8px;background:#f5f5f5;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0${currentUrl ? ';cursor:pointer' : ''}"${currentUrl ? ` onclick="showImagePreview('${esc(currentUrl)}')" role="button" tabindex="0" aria-label="View larger image"` : ''}>
           ${currentUrl
