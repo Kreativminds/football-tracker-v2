@@ -506,16 +506,16 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
     <span class="nav-season" id="navSeason">No season</span>
   </div>
   <div class="nav-links" id="navLinks">
-    <button class="nav-link active" data-section="home">&#127968; <span data-nav-label>Home</span></button>
-    <button class="nav-link" data-section="dashboard">&#128202; <span data-nav-label>Dashboard</span></button>
-    <button class="nav-link" data-section="squad"><span data-nav-label>Squad</span></button>
-    <button class="nav-link" data-section="games"><span data-nav-label>Games</span></button>
+    <button class="nav-link active" data-section="home" data-nav-icon="home"><span data-nav-label>Home</span></button>
+    <button class="nav-link" data-section="dashboard" data-nav-icon="dashboard"><span data-nav-label>Dashboard</span></button>
+    <button class="nav-link" data-section="squad" data-nav-icon="squad"><span data-nav-label>Squad</span></button>
+    <button class="nav-link" data-section="games" data-nav-icon="games"><span data-nav-label>Games</span></button>
     <span id="trackedNavLinks"></span>
-    <button class="nav-link" data-section="teamSummary"><span data-nav-label>Team Summary</span></button>
-    <button class="nav-link" data-section="tournSummary"><span data-nav-label>Tournament Summary</span></button>
-    <button class="nav-link" data-section="settings"><span data-nav-label>Settings</span></button>
-    <button class="nav-link" data-section="help">? <span data-nav-label>Help</span></button>
-    <button class="nav-link" id="adminNavBtn" data-section="admin" style="display:none;background:rgba(255,200,0,.15);color:#ffd700">&#9881; <span data-nav-label>Admin</span></button>
+    <button class="nav-link" data-section="teamSummary" data-nav-icon="team-summary"><span data-nav-label>Team Summary</span></button>
+    <button class="nav-link" data-section="tournSummary" data-nav-icon="team-summary"><span data-nav-label>Tournament Summary</span></button>
+    <button class="nav-link" data-section="settings" data-nav-icon="settings"><span data-nav-label>Settings</span></button>
+    <button class="nav-link" data-section="help" data-nav-icon="help"><span data-nav-label>Help</span></button>
+    <button class="nav-link" id="adminNavBtn" data-section="admin" data-nav-icon="admin" style="display:none;background:rgba(255,200,0,.15);color:#ffd700"><span data-nav-label>Admin</span></button>
     <button class="nav-account-btn" id="navAccountBtn" onclick="toggleNavAccountMenu(event)" title="">&#128100;</button>
   </div>
   <button class="hamburger" id="hamburger" aria-label="Menu">
@@ -524,19 +524,19 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 </nav>
 <div id="navAccountMenu" class="nav-account-menu" style="display:none"></div>
 <div class="mobile-menu" id="mobileMenu">
-  <button class="nav-link" data-section="home">&#127968; <span data-nav-label>Home</span></button>
-  <button class="nav-link" data-section="dashboard">&#128202; <span data-nav-label>Dashboard</span></button>
-  <button class="nav-link" data-section="squad"><span data-nav-label>Squad</span></button>
-  <button class="nav-link" data-section="games"><span data-nav-label>Games</span></button>
+  <button class="nav-link" data-section="home" data-nav-icon="home"><span data-nav-label>Home</span></button>
+  <button class="nav-link" data-section="dashboard" data-nav-icon="dashboard"><span data-nav-label>Dashboard</span></button>
+  <button class="nav-link" data-section="squad" data-nav-icon="squad"><span data-nav-label>Squad</span></button>
+  <button class="nav-link" data-section="games" data-nav-icon="games"><span data-nav-label>Games</span></button>
   <span id="trackedMobileLinks"></span>
-  <button class="nav-link" data-section="teamSummary"><span data-nav-label>Team Summary</span></button>
-  <button class="nav-link" data-section="tournSummary"><span data-nav-label>Tournament Summary</span></button>
-  <button class="nav-link" data-section="settings"><span data-nav-label>Settings</span></button>
-  <button class="nav-link" data-section="help">? <span data-nav-label>Help</span></button>
-  <button class="nav-link" id="adminNavBtnMobile" data-section="admin" style="display:none;color:#ffd700">&#9881; <span data-nav-label>Admin</span></button>
+  <button class="nav-link" data-section="teamSummary" data-nav-icon="team-summary"><span data-nav-label>Team Summary</span></button>
+  <button class="nav-link" data-section="tournSummary" data-nav-icon="team-summary"><span data-nav-label>Tournament Summary</span></button>
+  <button class="nav-link" data-section="settings" data-nav-icon="settings"><span data-nav-label>Settings</span></button>
+  <button class="nav-link" data-section="help" data-nav-icon="help"><span data-nav-label>Help</span></button>
+  <button class="nav-link" id="adminNavBtnMobile" data-section="admin" data-nav-icon="admin" style="display:none;color:#ffd700"><span data-nav-label>Admin</span></button>
   <div style="border-top:1px solid rgba(255,255,255,.15);margin-top:6px;padding-top:6px">
     <div id="mobileAccountInfo" style="padding:8px 12px;font-size:11px;color:#9aa5b1"></div>
-    <button class="nav-link" onclick="handleLogout()">&#128274; <span data-i18n="acc_btn_logout">Log Out</span></button>
+    <button class="nav-link" onclick="handleLogout()" data-nav-icon="log-out"><span data-i18n="acc_btn_logout">Log Out</span></button>
   </div>
 </div>
 
@@ -9770,6 +9770,63 @@ async function refreshBrandingPanel() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// NAVIGATION_ICONS — original, minimal SVG icon set for the nav menu.
+// One shared 24x24 viewBox, ~2px stroke, round caps/joins, currentColor
+// throughout so existing CSS fully controls color per state (default,
+// active, admin gold, logout) — no color is ever hardcoded in the SVG
+// itself. No external icon library; every path was designed for this set.
+// ══════════════════════════════════════════════════════════════════════════
+const NAVIGATION_ICONS = {
+  // Simple modern house: roofline + door, nothing decorative.
+  home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/><path d="M10 20v-5.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V20"/></svg>`,
+  // Clean three-bar analytics chart, ascending, so it reads as "data"
+  // rather than a generic grid.
+  dashboard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="7" width="4" height="13" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg>`,
+  // Three compact player heads/shoulders in a row — reads as "a group",
+  // not three isolated people icons.
+  squad: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.6"/><circle cx="16" cy="8" r="2.6"/><path d="M3.5 19c.6-3 2.4-4.8 4.5-4.8s3.9 1.8 4.5 4.8"/><path d="M11.5 19c.6-3 2.4-4.8 4.5-4.8s3.9 1.8 4.5 4.8"/></svg>`,
+  // A football (hexagon-panel style ball, drawn simply) alongside a
+  // small fixture/calendar mark — a real match concept, deliberately
+  // not shaped like a settings gear.
+  games: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.5" cy="12" r="6.5"/><path d="M9.5 8.2 12.3 10l-1 3.4H7.7l-1-3.4Z"/><path d="M17 6v3M17 6h3M17 6l2.2 2"/><path d="M18.5 15.5v3.2"/></svg>`,
+  // Single clean player silhouette — head + shoulders/torso in a running
+  // stance, deliberately generic (no face, no number).
+  'tracked-player': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="5.5" r="2.5"/><path d="M9 20l2-6.5-2.5-2 1-3 4 1.5 3 3.5-2 1.5 2 5.5"/></svg>`,
+  // Clipboard with a short tactical line — reads as "report/board", not
+  // a generic document icon.
+  'team-summary': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1"/><path d="M8 11.5 11 14l5-5.5"/><path d="M8 17h8"/></svg>`,
+  // Simple modern gear, 6 teeth, clean center circle.
+  settings: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.8"/><path d="M12 3.5v2.4M12 18.1v2.4M20.5 12h-2.4M5.9 12H3.5M17.7 6.3l-1.7 1.7M8 16l-1.7 1.7M17.7 17.7 16 16M8 8 6.3 6.3"/></svg>`,
+  // Question mark in a clean circle outline.
+  help: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.3 9.3a2.7 2.7 0 1 1 3.9 2.4c-.9.5-1.2 1-1.2 2"/><path d="M12 17v.01"/></svg>`,
+  // Shield outline with a small gear notch inside, matching the same
+  // stroke family — reads as "protected controls", not a generic badge.
+  admin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 19 6v6c0 4.5-3 7.6-7 8.5-4-.9-7-4-7-8.5V6l7-2.5Z"/><circle cx="12" cy="11" r="2"/><path d="M12 7.7v1M12 13.3v1M15.3 11h-1M9.7 11h-1"/></svg>`,
+  // Doorway/frame with a clear outward-pointing arrow — an exit, not a
+  // padlock (deliberately different concept from the old lock emoji).
+  'log-out': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4"/><path d="M14 12h7M18 8.5l3.2 3.5-3.2 3.5"/></svg>`,
+};
+
+function navIcon(key, size) {
+  const svg = NAVIGATION_ICONS[key];
+  if (!svg) return '';
+  const s = size || 20;
+  return svg.replace('<svg ', `<svg width="${s}" height="${s}" style="flex-shrink:0;vertical-align:-4px" `);
+}
+
+// Injects every nav icon into its real [data-nav-icon] element — the
+// static HTML shell can't run template literals directly, so icons are
+// applied here once at real app startup, matching the same pattern
+// already used for dynamic branding (applyDynamicBrandingToDocument).
+function applyNavigationIcons() {
+  document.querySelectorAll('[data-nav-icon]').forEach(btn => {
+    const key = btn.getAttribute('data-nav-icon');
+    if (btn.querySelector('svg')) return; // never inject twice
+    btn.insertAdjacentHTML('afterbegin', navIcon(key));
+  });
+}
+
 async function getSeasonStatus(season) {
   if (!season) return null;
   if (season.status === 'completed' || season.status === 'archived') return season.status;
@@ -9867,7 +9924,7 @@ async function renderClubCard(data) {
         ${metaLine.length ? `<div style="font-size:11px;opacity:.75;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${metaLine.join('')}</div>` : ''}
         ${cfg ? `<span class="badge season-header-badge" style="background:${cfg.bg};color:${cfg.color};font-weight:700;backdrop-filter:blur(2px);display:inline-flex;margin-top:10px">${cfg.label}</span>` : ''}
       </div>
-      ${jerseyUrl ? `<img src="${esc(jerseyUrl)}" alt="" loading="lazy" class="club-card-jersey" style="width:110px;height:auto;object-fit:contain;flex-shrink:0" onerror="this.style.display='none'">` : ''}
+      ${jerseyUrl ? `<img src="${esc(jerseyUrl)}" alt="" loading="lazy" class="club-card-jersey" style="width:140px;height:auto;object-fit:contain;flex-shrink:0;opacity:.35" onerror="this.style.display='none'">` : ''}
     </div>
     ${infoItems.length || data.onViewTeam || data.onViewFixtures ? `
     <div style="position:relative;background:rgba(0,0,0,.28);padding:14px 20px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
@@ -9900,12 +9957,12 @@ async function renderClubCard(data) {
           }
         </div>
         <div style="flex:1;min-width:0;color:#fff">
-          <div style="font-weight:800;font-size:15px;letter-spacing:.2px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          <div style="font-weight:800;font-size:14.5px;letter-spacing:.2px;line-height:1.3">
             ${esc((data.clubName || '').toUpperCase())}${data.ageGroup?' · '+esc(data.ageGroup):''} · <span style="font-weight:600">${esc(data.seasonName||'')}</span>
           </div>
         </div>
-        ${cfg ? `<span class="badge" style="background:${cfg.bg};color:${cfg.color};font-weight:700;backdrop-filter:blur(2px);flex-shrink:0;font-size:10px;padding:2px 7px">${cfg.label}</span>` : ''}
       </div>
+      ${cfg ? `<div style="margin-top:8px"><span class="badge" style="background:${cfg.bg};color:${cfg.color};font-weight:700;backdrop-filter:blur(2px);font-size:10px;padding:2px 7px">${cfg.label}</span></div>` : ''}
 
       ${metaLine.length ? `<div style="font-size:11px;opacity:.8;color:#fff;margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">${metaLine.join('<span style="opacity:.5">|</span>')}</div>` : ''}
 
@@ -18842,6 +18899,7 @@ async function continueAppLoadAfterLogin() {
     await runSilentIntegrityCheck();
     checkForStaleVersion();
     await applyDynamicBrandingToDocument();
+    applyNavigationIcons();
     document.getElementById('loading').style.display = 'none';
     document.getElementById('authGate').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
