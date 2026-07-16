@@ -335,12 +335,19 @@ tr:hover td.col-sticky-num,tr:hover td.col-sticky-name{background:var(--highligh
 .rm-form{background:#fff;border-radius:4px;width:680px;max-width:95vw;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.2)}
 
 /* ── PLAYER CARD POPUP ── */
-.pc-header{background:#a23b3b;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:14px}
 .pc-photo{width:56px;height:56px;border-radius:6px;object-fit:cover;background:#fff;flex-shrink:0;border:2px solid rgba(255,255,255,.4)}
 .pc-photo-fallback{width:56px;height:56px;border-radius:6px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;flex-shrink:0;border:2px solid rgba(255,255,255,.4)}
+.pc-header-v2{background-size:cover;background-position:center;padding:20px;color:#fff;position:relative}
+.pc-header-v2-top{display:flex;align-items:center;gap:14px}
+.pc-shirt-badge{width:52px;height:52px;border:2px solid #B23333;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;flex-shrink:0;background:rgba(15,30,46,.5)}
+.pc-header-v2-divider{height:1px;background:rgba(255,255,255,.25);margin:16px 0}
+.pc-header-v2-facts{display:flex;gap:20px;flex-wrap:wrap}
+.pc-fact{display:flex;align-items:center;gap:8px}
+.pc-fact-main{font-size:13px;font-weight:700}
+.pc-fact-sub{font-size:10px;opacity:.75}
 .pc-name{font-size:17px;font-weight:700;line-height:1.2}
-.pc-shirt{font-size:11px;opacity:.85;margin-top:2px}
-.pc-close{margin-left:auto;background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;opacity:.8}
+.pc-shirt{font-size:12px;opacity:.85;margin-top:2px}
+.pc-close{position:absolute;top:14px;right:16px;background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;opacity:.8}
 .pc-body{padding:18px 20px}
 .pc-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#a23b3b;border-bottom:2px solid #a23b3b;padding-bottom:6px;margin-bottom:12px;display:inline-block}
 .pc-row{padding:8px 0;border-bottom:1px solid #eee}
@@ -9879,6 +9886,10 @@ const NAVIGATION_ICONS = {
   // Doorway/frame with a clear outward-pointing arrow — an exit, not a
   // padlock (deliberately different concept from the old lock emoji).
   'log-out': `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4"/><path d="M14 12h7M18 8.5l3.2 3.5-3.2 3.5"/></svg>`,
+  // Simple calendar — used on the Player Card for date of birth.
+  calendar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2"/><path d="M4 9.5h16"/><path d="M8 3.5v3M16 3.5v3"/></svg>`,
+  // Simple boot outline — used on the Player Card for preferred foot.
+  boot: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5v6.2l-4.3 3.6A2 2 0 0 0 4 14.8V19a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2.2a2 2 0 0 0-1.1-1.8L13 12.5V3.5Z"/><path d="M9 9.7h4"/></svg>`,
 };
 
 function navIcon(key, size) {
@@ -16920,32 +16931,44 @@ async function openPlayerCardPopup(playerId) {
   if (!p) return;
   const el = document.getElementById('playerCardContent');
   const age = calcAge(p.dateOfBirth);
-  const initials = (p.fullName||'').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
   const flags = getFlagsForNationality(p.nationality);
   const cvBg = await getBrandingAsset('playerCvBackground');
 
-  // Apply the real Player CV Background to the WHOLE card, not just the
-  // header strip — a genuine CV identity, not a small accent. Falls back
-  // cleanly to the original plain white card when no asset is configured.
-  el.style.backgroundImage = cvBg ? `url('${esc(cvBg)}')` : '';
-  el.style.backgroundSize = 'cover';
-  el.style.backgroundPosition = 'center';
-  el.style.backgroundColor = cvBg ? '#0F1E2E' : '';
+  // The real Player CV Background covers the header exactly as designed
+  // in the approved reference — the image itself already carries the
+  // navy/red identity, so no extra dark overlay is layered on top of it
+  // (unlike the earlier draft), matching the reference precisely. Falls
+  // back to the existing plain maroon header when no asset is configured.
+  el.style.backgroundImage = '';
+  el.style.backgroundColor = '';
 
   el.innerHTML = `
-    <div class="pc-header" style="${cvBg ? 'background:rgba(15,30,46,.45);position:relative' : ''}">
-      <div style="display:flex;align-items:center;gap:14px;width:100%">
-      ${p.photoUrl
-        ? `<img class="pc-photo" src="${esc(p.photoUrl)}" onerror="this.outerHTML='<div class=&quot;pc-photo-fallback&quot;>${initials}</div>'">`
-        : `<div class="pc-photo-fallback">${initials}</div>`}
-      <div>
-        <div class="pc-name">${esc(p.displayName || shortName(p.fullName))}</div>
-        <div class="pc-shirt">#${p.shirtNumber||'—'} · ${esc(p.primaryPosition||'—')}</div>
-      </div>
+    <div class="pc-header-v2" style="${cvBg ? `background-image:url('${esc(cvBg)}');background-size:cover;background-position:center` : 'background:#a23b3b'}">
       <button class="pc-close" onclick="closePlayerCardPopup()">&times;</button>
+      <div class="pc-header-v2-top">
+        <div class="pc-shirt-badge">${p.shirtNumber||'—'}</div>
+        <div>
+          <div class="pc-name">${esc(p.displayName || shortName(p.fullName))}</div>
+          <div class="pc-shirt">${esc(p.primaryPosition||'—')}</div>
+        </div>
+      </div>
+      <div class="pc-header-v2-divider"></div>
+      <div class="pc-header-v2-facts">
+        <div class="pc-fact">
+          ${navIcon('calendar',18)}
+          <div><div class="pc-fact-main">${p.dateOfBirth?fmtDate(p.dateOfBirth):'—'}</div><div class="pc-fact-sub">${age!==null?`${age} ${I18n.t('pc_years_suffix')}`:I18n.t('pc_lbl_dob')}</div></div>
+        </div>
+        <div class="pc-fact">
+          <span style="font-size:18px">${flags||'&#127988;'}</span>
+          <div><div class="pc-fact-main">${esc(p.nationality||'—')}</div><div class="pc-fact-sub">${I18n.t('pc_lbl_nationality')}</div></div>
+        </div>
+        <div class="pc-fact">
+          ${navIcon('boot',18)}
+          <div><div class="pc-fact-main">${esc(p.dominantFoot||'—')}</div><div class="pc-fact-sub">${I18n.t('pc_lbl_foot')}</div></div>
+        </div>
       </div>
     </div>
-    <div class="pc-body" style="${cvBg ? 'background:rgba(255,255,255,.93);margin:0' : ''}">
+    <div class="pc-body">
       <div class="pc-section-title">${I18n.t('pc_section_title')}</div>
       <div class="pc-row">
         <div class="pc-label">${I18n.t('pc_lbl_name')}</div>
@@ -16972,7 +16995,7 @@ async function openPlayerCardPopup(playerId) {
         <div class="pc-value">${p.isActive?I18n.t('pc_status_active'):I18n.t('pc_status_archived')}</div>
       </div>
     </div>
-    <div class="pc-footer" style="${cvBg ? 'background:rgba(255,255,255,.93)' : ''}">
+    <div class="pc-footer">
       <button class="btn btn-secondary btn-sm" onclick="closePlayerCardPopup();editPlayer(${p.playerId})">&#9999; ${I18n.t('pc_btn_edit')}</button>
     </div>
   `;
