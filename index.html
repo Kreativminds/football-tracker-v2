@@ -4064,8 +4064,19 @@ async function claimLocalDataForAccount() {
     try { records = await DB.getAll(store); } catch(e) { continue; }
     for (const record of records) {
       if (record.userId === userId) continue;
+      // Real, critical safety check — confirmed necessary after a severe
+      // real incident where this function silently overwrote a DIFFERENT,
+      // already-authenticated real account's genuine cloud data. Only a
+      // record with NO cloudId (never synced) AND NO userId at all
+      // (never claimed by anyone) is genuinely eligible — that's the one
+      // real, legitimate case this function exists for: data created
+      // during the offline emergency-bypass path, before any real account
+      // ever logged in on this device. Anything with a cloudId, or any
+      // existing (even different) userId, belongs to someone real and
+      // must NEVER be silently reassigned.
+      if (record.cloudId || record.userId) continue;
       record.userId = userId;
-      record.syncStatus = record.cloudId ? 'modified' : 'local'; // force re-push so the cloud row gets user_id too
+      record.syncStatus = 'local';
       await _origPut(store, record);
       claimed++;
     }
