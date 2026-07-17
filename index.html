@@ -16105,14 +16105,15 @@ const Auth = (() => {
   }
 
   // Real Password Reset — calls Supabase's actual /auth/v1/recover
-  // endpoint, which sends a genuine email with a reset link. redirect_to
-  // points back at this same page, since the app is a single-file SPA
-  // with no separate route — the returned link will include a real
-  // access token in the URL fragment, handled by handlePasswordResetCallback
-  // at real app startup (see below).
+  // endpoint, which sends a genuine email with a reset link. Per
+  // GoTrue's real REST contract (confirmed via the official Postman
+  // collection and a matching GoTrue bug report), redirect_to must be
+  // sent as a QUERY PARAMETER on the request URL itself — not nested
+  // under "options" (that's the JS SDK's internal convention, which this
+  // app doesn't use) and not as a bare top-level body field either.
   async function requestPasswordReset(email) {
     const redirectTo = window.location.origin + window.location.pathname;
-    await _authRequest('recover', { email, options: { redirect_to: redirectTo } });
+    await _authRequest('recover?redirect_to=' + encodeURIComponent(redirectTo), { email });
   }
 
   // Called once the user has clicked the real reset link from their email
