@@ -4953,7 +4953,7 @@ const TR = {
     ch_notes_placeholder:'Notes about this season...',
     ch_empty_title:'No club history yet',
     ch_empty_desc:'Add past clubs and seasons to build a complete career record.',
-    ch_coach_prefix:'Coach:',
+    ch_coach_prefix:'Coach:', ch_lbl_period:'Period', ch_lbl_level:'Level', ch_lbl_notes:'Notes',
     ch_present:'&rarr; Present',
     ch_err_club_required:'Club name is required.',
     ch_saved:'Club history saved.',
@@ -5363,6 +5363,7 @@ const TR = {
     pp_nav_dashboard:'Overview', pp_nav_stats:'Stats', pp_nav_games:'Games', pp_nav_clubs:'Club History',
     pp_off_season_title:'Season\'s Over — Enjoy the Rest!', pp_off_season_desc:'There are no more games right now. Take some time to rest and recharge — the next season will be here before you know it.',
     pp_off_season_games_empty:'No games recorded for this season yet.',
+    pp_off_season_messages_pool:'Season\'s over — time to rest up and recharge!|Enjoy the break — you\'ve earned it!|No games right now, so make the most of your time off!|Off-season vibes — rest, relax, and get ready for next time!|Take it easy for a while — the pitch will be waiting for you!',
     pp_view_my_card:'View My Player Card', pp_view_my_card_hint:'See your profile, stats, and achievements',
     pp_nav_achievements:'Achievements', pp_nav_events:'Events', pp_nav_teamsummary:'Team Summary',
     pp_training_tab_new:'New Session', pp_training_tab_history:'History',
@@ -6128,7 +6129,7 @@ const TR = {
     ch_notes_placeholder:'Notas sobre esta época...',
     ch_empty_title:'Ainda sem histórico de clubes',
     ch_empty_desc:'Adicione clubes e épocas anteriores para construir um registo de carreira completo.',
-    ch_coach_prefix:'Treinador:',
+    ch_coach_prefix:'Treinador:', ch_lbl_period:'Período', ch_lbl_level:'Nível', ch_lbl_notes:'Notas',
     ch_present:'&rarr; Presente',
     ch_err_club_required:'O nome do clube é obrigatório.',
     ch_saved:'Histórico de clube guardado.',
@@ -6538,6 +6539,7 @@ const TR = {
     pp_nav_dashboard:'Resumo', pp_nav_stats:'Estatísticas', pp_nav_games:'Jogos', pp_nav_clubs:'Histórico de Clubes',
     pp_off_season_title:'A Época Terminou — Aproveita o Descanso!', pp_off_season_desc:'Não há mais jogos por agora. Aproveita para descansar e recarregar energias — a próxima época chega num instante.',
     pp_off_season_games_empty:'Ainda não há jogos registados nesta época.',
+    pp_off_season_messages_pool:'A época terminou — hora de descansar e recarregar energias!|Aproveita a pausa — bem merecida!|Não há jogos por agora, aproveita o teu tempo livre!|Espírito de época baixa — descansa e prepara-te para a próxima!|Vai com calma por uns tempos — o campo vai estar à tua espera!',
     pp_view_my_card:'Ver o Meu Cartão de Jogador', pp_view_my_card_hint:'Vê o teu perfil, estatísticas e conquistas',
     pp_nav_achievements:'Conquistas', pp_nav_events:'Eventos', pp_nav_teamsummary:'Resumo da Equipa',
     pp_training_tab_new:'Nova Sessão', pp_training_tab_history:'Histórico',
@@ -9630,14 +9632,29 @@ let _brandingSaveChain = Promise.resolve(); // serializes saves — see saveBran
 
 async function loadBranding(forceRefresh) {
   if (_brandingCache && !forceRefresh) return _brandingCache;
-  if (!Sync.isConfigured() || !Auth.isLoggedIn()) {
-    // No connection / not logged in — branding literally cannot be
-    // loaded fresh; fall back to whatever was last held in memory this
-    // session (possibly nothing), never a stale local database copy.
+
+  // A Player Portal session (PIN login) never creates a real Auth
+  // session — Auth.login() is only ever called by the guardian email/
+  // password flow. Fall back to the guardian's real user_id, already
+  // known from the bootstrapped player record (remoteOwnerUserId), so
+  // branding genuinely loads for players too. Safe: branding is
+  // non-sensitive, effectively public data (image URLs only).
+  let effectiveUserId = null;
+  if (Auth.isLoggedIn()) {
+    effectiveUserId = Auth.getUserId();
+  } else if (State.portalPlayerId) {
+    const portalPlayer = await DB.get('players', State.portalPlayerId);
+    effectiveUserId = portalPlayer?.remoteOwnerUserId || null;
+  }
+
+  if (!Sync.isConfigured() || !effectiveUserId) {
+    // No connection / no way to know whose branding to load — fall back
+    // to whatever was last held in memory this session (possibly
+    // nothing), never a stale local database copy.
     return _brandingCache || {};
   }
   try {
-    const rows = await Sync.supabaseRequest('GET', 'app_branding', null, { user_id: 'eq.' + Auth.getUserId(), limit: '1' });
+    const rows = await Sync.supabaseRequest('GET', 'app_branding', null, { user_id: 'eq.' + effectiveUserId, limit: '1' });
     _brandingCache = rows[0]?.payload || {};
   } catch (e) {
     console.error('[Branding] load failed:', e);
@@ -13182,6 +13199,15 @@ async function renderPlayerPortalHome() {
   const player = await DB.get('players', playerId);
   if (!player) { el.innerHTML = `<p>${I18n.t('pp_player_not_found')}</p>`; return; }
 
+  // Real, rotating off-season welcome message — reuses the same season-
+  // status resolver already built for the guardian Home page. A genuine
+  // random pick from a real pool each time Home loads, per the explicit
+  // "different message every time" request, rather than one static line.
+  const seasonStatus = State.currentSeason ? await getSeasonStatus(State.currentSeason) : null;
+  const isOffSeason = seasonStatus === 'completed' || seasonStatus === 'archived';
+  const offSeasonMessages = I18n.t('pp_off_season_messages_pool').split('|');
+  const offSeasonMessage = offSeasonMessages[Math.floor(Math.random() * offSeasonMessages.length)];
+
   const games = (await DB.getAll('games','seasonId', State.currentSeasonId)).filter(g => g.date);
   const allGP = await DB.getAll('gamePlayers','seasonId', State.currentSeasonId);
 
@@ -13203,6 +13229,8 @@ async function renderPlayerPortalHome() {
 
   el.innerHTML = `
     <div class="page-header"><div><h1>${I18n.t('pp_home_title')}</h1><div class="page-header-sub">${esc(shortName(player.fullName))}</div></div></div>
+
+    ${isOffSeason ? `<div class="card" style="background:#e8f0fe;border-color:#b8d4f8;text-align:center;margin-bottom:12px"><div style="font-size:24px">&#127774;</div><div style="font-weight:700;margin-top:4px">${esc(offSeasonMessage)}</div></div>` : ''}
 
     <div class="card" style="text-align:center;cursor:pointer" onclick="openPlayerCardPopup(${playerId})">
       <div style="font-size:13px;font-weight:700">&#127917; ${I18n.t('pp_view_my_card')}</div>
@@ -13490,26 +13518,59 @@ async function renderPlayerPortalClubs() {
     return c.playerId === playerId;
   });
   all.sort((a,b) => new Date(b.startDate||0) - new Date(a.startDate||0));
+  State.portalClubHistoryCache = all; // so the detail popup can look up by index without a second DB query
 
   el.innerHTML = `
     <div class="page-header"><div><h1>${I18n.t('ch_title')}</h1></div></div>
     ${!all.length ? `<div class="empty"><strong>${I18n.t('ch_empty_title')}</strong></div>` : `
     <div class="timeline-list">
-      ${all.map(c => `
-        <div class="timeline-item">
+      ${all.map((c, i) => `
+        <div class="timeline-item" style="cursor:pointer" onclick="openPortalClubHistoryDetail(${i})">
           <div style="display:flex;gap:12px;align-items:flex-start">
             ${c.logoUrl?`<img src="${esc(c.logoUrl)}" style="width:40px;height:40px;object-fit:contain;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`:
             `<div style="width:40px;height:40px;background:#f0f0f0;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">&#9917;</div>`}
-            <div>
+            <div style="flex:1">
               <div class="ti-title">${esc(c.clubName)} ${c.ageGroup?`<span class="pos-pill">${esc(c.ageGroup)}</span>`:''}</div>
               <div class="ti-meta">${c.season||''} ${c.startDate?'· '+fmtDate(c.startDate):''} ${c.endDate?'→ '+fmtDate(c.endDate):I18n.t('ch_present')}</div>
               ${c.coachName?`<div class="ti-meta">${I18n.t('ch_coach_prefix')} ${esc(c.coachName)}</div>`:''}
               ${c.notes?`<div class="ti-desc">${esc(c.notes)}</div>`:''}
             </div>
+            <span style="color:var(--muted);font-size:18px;flex-shrink:0">&rsaquo;</span>
           </div>
         </div>`).join('')}
     </div>`}
   `;
+}
+
+// Real, appealing detail view for a single Club History entry, opened
+// by tapping any real entry in the timeline. Read-only (no edit button
+// at all — a player viewing their own real, non-secret club history),
+// matching the same clean modal pattern as the Player Card popup.
+function openPortalClubHistoryDetail(index) {
+  const c = (State.portalClubHistoryCache || [])[index];
+  if (!c) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'rm-form-overlay open';
+  overlay.id = 'portalClubDetailOverlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="rm-form" style="max-width:400px;padding:0;overflow:hidden">
+      <div style="background:linear-gradient(135deg,#0F1E2E,#1a2f45);color:#fff;padding:20px;text-align:center;position:relative">
+        <button onclick="document.getElementById('portalClubDetailOverlay').remove()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#fff;font-size:20px;cursor:pointer;opacity:.8">&times;</button>
+        ${c.logoUrl
+          ? `<img src="${esc(c.logoUrl)}" style="width:64px;height:64px;object-fit:contain;border-radius:8px;background:#fff;padding:6px;margin:0 auto" onerror="this.style.display='none'">`
+          : `<div style="width:64px;height:64px;border-radius:8px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto">&#9917;</div>`}
+        <div style="font-size:18px;font-weight:800;margin-top:10px">${esc(c.clubName)}</div>
+        <div style="font-size:12px;opacity:.85;margin-top:2px">${esc(c.season||'')}${c.ageGroup?' · '+esc(c.ageGroup):''}</div>
+      </div>
+      <div style="padding:18px 20px">
+        <div class="pc-row"><div class="pc-label">${I18n.t('ch_lbl_period')}</div><div class="pc-value">${c.startDate?fmtDate(c.startDate):'—'} ${c.endDate?'→ '+fmtDate(c.endDate):'→ '+I18n.t('ch_present')}</div></div>
+        ${c.level ? `<div class="pc-row"><div class="pc-label">${I18n.t('ch_lbl_level')}</div><div class="pc-value">${esc(c.level)}</div></div>` : ''}
+        ${c.coachName ? `<div class="pc-row"><div class="pc-label">${I18n.t('ch_coach_prefix')}</div><div class="pc-value">${esc(c.coachName)}</div></div>` : ''}
+        ${c.notes ? `<div class="pc-row"><div class="pc-label">${I18n.t('ch_lbl_notes')}</div><div class="pc-value">${esc(c.notes)}</div></div>` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
 }
 
 // ── PORTAL — ACHIEVEMENTS (read-only) ────────────────────────────────────────
