@@ -3400,6 +3400,15 @@ function renderAuthGate() {
       </div>
       <div id="acc-error" style="display:none;font-size:12px;color:#b03030;margin-bottom:10px"></div>
       <button class="btn btn-primary" id="acc-submit-btn" style="width:100%" onclick="handleAccountSubmit()">${I18n.t('acc_btn_login')}</button>
+      <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+        <span style="font-size:11px;color:var(--muted)">${I18n.t('acc_or_divider')}</span>
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+      </div>
+      <button type="button" class="btn btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px" onclick="Auth.signInWithGoogle()">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        ${I18n.t('acc_btn_continue_google')}
+      </button>
       <div style="text-align:center;margin-top:10px" id="acc-forgot-password-link">
         <a href="#" onclick="event.preventDefault();handleForgotPassword()" style="font-size:12px;color:var(--muted);text-decoration:underline">${I18n.t('acc_forgot_password')}</a>
       </div>
@@ -3998,6 +4007,24 @@ function setupPageNameOnScroll() {
   _pageNameObserver.observe(heading);
 }
 
+// Real, critical safety fix — confirmed necessary after a severe incident
+// where a second, different real account logging in on the same device
+// displayed the FIRST account's still-cached local data (the underlying
+// cloud ownership was already separately fixed and protected in
+// claimLocalDataForAccount(), but the local IndexedDB cache itself was
+// never cleared, so stale data from a different real account kept
+// showing on-screen). Only clears local data when the newly-logged-in
+// user is genuinely DIFFERENT from whichever account's data is already
+// cached — logging back into the SAME account (e.g. after a session
+// expiry) never triggers a wipe, since that would be a real, separate
+// data-loss risk of its own.
+async function clearLocalDataIfDifferentAccount(newUserId) {
+  const lastAccount = await DB.get('appMeta', 'dataClaimedByUserId');
+  if (!lastAccount?.value || lastAccount.value === newUserId) return; // same account or genuinely first-ever login — nothing stale to clear
+  await DB.clearAllRealStores();
+  await DB.del('appMeta', 'dataClaimedByUserId').catch(()=>{});
+}
+
 async function handleAccountSubmit() {
   const email = document.getElementById('acc-email')?.value.trim();
   const password = document.getElementById('acc-password')?.value;
@@ -4028,7 +4055,10 @@ async function handleAccountSubmit() {
       Toast.show(I18n.t('acc_signup_success'));
     }
 
-    if (Auth.isLoggedIn()) await claimLocalDataForAccount();
+    if (Auth.isLoggedIn()) {
+      await clearLocalDataIfDifferentAccount(Auth.getUserId());
+      await claimLocalDataForAccount();
+    }
 
     if (gateVisible) {
       // First successful login on this device — proceed straight into the
@@ -5207,6 +5237,7 @@ const TR = {
     acc_lbl_email:'Email', acc_lbl_password:'Password',
     acc_btn_login:'Log In', acc_btn_signup:'Create Account',
     acc_forgot_password:'Forgot password?', acc_forgot_password_prompt:'Enter your email address:',
+    acc_or_divider:'OR', acc_btn_continue_google:'Continue with Google', acc_google_login_failed:'Google sign-in could not be completed. Please try again.',
     acc_forgot_password_sent:'If an account exists for {email}, a reset link has been sent.',
     acc_reset_intro:'Enter a new password for your account.', acc_reset_new_password:'New Password',
     acc_reset_submit:'Set New Password', acc_reset_success:'Password updated. Please log in with your new password.',
@@ -6388,6 +6419,7 @@ const TR = {
     acc_lbl_email:'Email', acc_lbl_password:'Palavra-passe',
     acc_btn_login:'Iniciar Sessão', acc_btn_signup:'Criar Conta',
     acc_forgot_password:'Esqueceu-se da password?', acc_forgot_password_prompt:'Indique o seu endereço de email:',
+    acc_or_divider:'OU', acc_btn_continue_google:'Continuar com Google', acc_google_login_failed:'Não foi possível iniciar sessão com o Google. Por favor tente novamente.',
     acc_forgot_password_sent:'Se existir uma conta para {email}, foi enviado um link de recuperação.',
     acc_reset_intro:'Indique uma nova password para a sua conta.', acc_reset_new_password:'Nova Password',
     acc_reset_submit:'Definir Nova Password', acc_reset_success:'Password atualizada. Por favor inicie sessão com a nova password.',
@@ -7371,7 +7403,13 @@ const DB = (() => {
     return _db && _db.objectStoreNames.contains(store);
   }
 
-  return { open, get, getAll, put, del, softDelete, clear, getAllFromAllStores, restoreAllStores, hasStore };
+  async function clearAllRealStores() {
+    for (const s of ALL_REAL_STORES) {
+      try { await clear(s); } catch(e) { /* store may not exist on this schema version — safe to skip */ }
+    }
+  }
+
+  return { open, get, getAll, put, del, softDelete, clear, getAllFromAllStores, restoreAllStores, hasStore, clearAllRealStores };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -16113,6 +16151,69 @@ const Auth = (() => {
     return data;
   }
 
+  // Real Google Sign-In — redirects to Supabase's actual /auth/v1/authorize
+  // endpoint. A plain GET with no PKCE code_challenge parameter supplied
+  // triggers the implicit flow (confirmed via Supabase's own documentation):
+  // Google authenticates the user, then Supabase redirects back to
+  // redirect_to with a real access/refresh token pair directly in the URL
+  // fragment — no code-exchange step involved.
+  function signInWithGoogle() {
+    const redirectTo = window.location.origin + window.location.pathname;
+    const authorizeUrl = _supabaseAuthBase() + 'authorize?provider=google&redirect_to=' + encodeURIComponent(redirectTo);
+    window.location.href = authorizeUrl;
+  }
+
+  // Parses a real Google OAuth implicit-flow callback out of the URL
+  // fragment (#access_token=...&refresh_token=...&expires_in=...).
+  // Distinguished from the password-recovery fragment (setRecoverySession)
+  // by the explicit ABSENCE of type=recovery — a genuine OAuth login
+  // callback never carries that param. Returns 'success', 'error', or
+  // null (nothing relevant in the URL at all, the normal case on every
+  // other page load).
+  async function handleGoogleCallback() {
+    const hash = window.location.hash.replace(/^#/, '');
+    const params = new URLSearchParams(hash);
+    const query = new URLSearchParams(window.location.search);
+
+    if (query.get('error')) {
+      history.replaceState(null, '', window.location.pathname);
+      return 'error';
+    }
+
+    if (params.get('type') === 'recovery' || !params.get('access_token')) return null;
+
+    try {
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      const expiresIn = parseInt(params.get('expires_in')) || 3600;
+
+      // The raw implicit-flow fragment never includes a nested user
+      // object (confirmed via Supabase's own docs) — only bare tokens.
+      // Fetch the genuine user record with one real, authenticated call,
+      // rather than trust a manually-decoded JWT client-side.
+      const anonKey = Sync.getRawConfig().anonKey;
+      const userRes = await fetch(_supabaseAuthBase() + 'user', {
+        headers: { 'apikey': anonKey, 'Authorization': 'Bearer ' + accessToken },
+      });
+      if (!userRes.ok) throw new Error('Could not verify the Google sign-in.');
+      const userData = await userRes.json();
+
+      await _storeSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_in: expiresIn,
+        user: userData,
+      });
+
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      return 'success';
+    } catch(e) {
+      console.error('[Auth] Google callback processing failed:', e);
+      history.replaceState(null, '', window.location.pathname);
+      return 'error';
+    }
+  }
+
   // Real Password Reset — calls Supabase's actual /auth/v1/recover
   // endpoint, which sends a genuine email with a reset link. Per
   // GoTrue's real REST contract (confirmed via the official Postman
@@ -16180,7 +16281,7 @@ const Auth = (() => {
     return true;
   }
 
-  return { isLoggedIn, getUserId, getAccessToken, getEmail, loadSession, signUp, login, refresh, logout, requestPasswordReset, completePasswordReset, setRecoverySession };
+  return { isLoggedIn, getUserId, getAccessToken, getEmail, loadSession, signUp, login, refresh, logout, requestPasswordReset, completePasswordReset, setRecoverySession, signInWithGoogle, handleGoogleCallback };
 })();
 
 const Sync = (() => {
@@ -19221,6 +19322,22 @@ async function init() {
     await loadMeta();
     await Sync.loadConfig();
     await Auth.loadSession();
+
+    // Real Google OAuth callback check — must run before the recovery
+    // check below, since both read from window.location and are
+    // mutually exclusive: a recovery link always carries type=recovery,
+    // a genuine OAuth login callback never does.
+    const googleResult = await Auth.handleGoogleCallback();
+    if (googleResult === 'error') {
+      Toast.error(I18n.t('acc_google_login_failed'));
+      // Falls through to the normal authGate render below — not a hard stop.
+    } else if (googleResult === 'success') {
+      // Same real safety sequence already fixed for email/password login —
+      // a Google sign-in on a device with a DIFFERENT account's cached
+      // local data carries the exact same real risk confirmed tonight.
+      await clearLocalDataIfDifferentAccount(Auth.getUserId());
+      await claimLocalDataForAccount();
+    }
 
     // Real password-reset recovery link check — takes priority over
     // everything else at startup, since a Parent clicking their reset
