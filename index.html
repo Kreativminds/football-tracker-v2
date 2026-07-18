@@ -16285,11 +16285,11 @@ const Auth = (() => {
   function _storeSession(data) {
     const nextUserId = data.user?.id || null;
     // The exact, confirmed trigger: previousUserId !== nextUserId, using
-    // the real auth.users.id UUID. A null->something or something->
-    // different-something transition both count; a same-UUID refresh
-    // (e.g. this exact function called again for the same user after a
-    // token refresh) must NOT increment the epoch.
-    if (_lastKnownUserId !== null && nextUserId !== null && _lastKnownUserId !== nextUserId) {
+    // the real auth.users.id UUID. This now correctly covers every real
+    // transition — null->someone (first-ever login), someone->different
+    // someone (account switch) — while still correctly excluding a
+    // same-UUID token refresh (nextUserId === _lastKnownUserId).
+    if (nextUserId !== null && _lastKnownUserId !== nextUserId) {
       _sessionEpoch++;
     }
     _lastKnownUserId = nextUserId;
